@@ -1,6 +1,6 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { X, Sparkles, Code, Play, Loader2, AlertCircle, Image as ImageIcon, Monitor, Maximize2, Minimize2, Database, Eye, LayoutTemplate, CreditCard, Table as TableIcon, Type, Box, Wand2, PlusCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { X, Sparkles, Code, Play, Loader2, AlertCircle, Image as ImageIcon, Monitor, Maximize2, Minimize2, Database, Eye, LayoutTemplate, CreditCard, Table as TableIcon, Type, Box, Wand2, PlusCircle, FileText, Link as LinkIcon, ArrowRight } from 'lucide-react';
 import { WebComponentTemplate, Dataset } from '../types';
 import { apiService } from '../services/api';
 import { WebComponentRenderer } from './WebComponentRenderer';
@@ -28,7 +28,8 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
   const [description, setDescription] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedDatasetId, setSelectedDatasetId] = useState<number | ''>(''); 
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | string>('__AUTO__'); 
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | string>(-1); 
+  const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -38,12 +39,90 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
       code: string
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const [viewMode, setViewMode] = useState<'preview' | 'code' | 'example'>('preview');
   const [isMaximized, setIsMaximized] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   
   const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
+
+  // Compute mapped data for preview
+  const mappedData = useMemo(() => {
+    if (!selectedDataset?.previewData) return undefined;
+
+    // If no mapping is active or in Auto mode, return original data
+    if (Object.keys(fieldMapping).length === 0 || selectedTemplateId === '__AUTO__') {
+      return selectedDataset.previewData;
+    }
+
+    // Apply mapping to rows
+    // We create a new array of rows where keys are transformed based on mapping
+    const originalRows = selectedDataset.previewData.rows || [];
+    const mappedRows = originalRows.map((row: any) => {
+      const newRow: any = { ...row }; // Keep original fields for safety
+      
+      Object.entries(fieldMapping).forEach(([targetField, sourceCol]) => {
+        const colKey = sourceCol as string;
+        
+        // Handle Fixed/Constant values
+        if (colKey && colKey.startsWith('__CONST__:')) {
+             newRow[targetField] = colKey.replace('__CONST__:', '');
+        } 
+        // If a mapping exists for this target field, copy the value from source column
+        else if (colKey && row[colKey] !== undefined) {
+          newRow[targetField] = row[colKey];
+        }
+      });
+      return newRow;
+    });
+
+    return {
+      ...selectedDataset.previewData,
+      rows: mappedRows
+    };
+  }, [selectedDataset, fieldMapping, selectedTemplateId]);
+
+  // Auto-map fields when template or dataset changes
+  useEffect(() => {
+    if (selectedTemplateId === '__AUTO__' || !selectedDatasetId) {
+      setFieldMapping({});
+      return;
+    }
+
+    const template = BASIC_WEB_COMPONENTS.find(t => t.id === selectedTemplateId);
+    const dataset = datasets.find(d => d.id === selectedDatasetId);
+
+    // Only map if template has structured headers and dataset has columns
+    if (template?.structuredExample?.table?.headers && dataset?.previewData?.columns) {
+      const requiredFields = template.structuredExample.table.headers;
+      const availableColumns = dataset.previewData.columns;
+      const newMapping: Record<string, string> = {};
+
+      requiredFields.forEach(reqField => {
+        // Special handling for 'type' field -> default to constant info
+        if (reqField === 'type') {
+           newMapping[reqField] = '__CONST__:info';
+           return;
+        }
+
+        // Simple case-insensitive auto-match
+        const match = availableColumns.find(col => 
+          col.name.toLowerCase() === reqField.toLowerCase() ||
+          col.alias?.toLowerCase() === reqField.toLowerCase()
+        );
+        if (match) {
+          newMapping[reqField] = match.name;
+        } else {
+          newMapping[reqField] = '';
+        }
+      });
+      setFieldMapping(newMapping);
+    } else {
+      setFieldMapping({});
+    }
+  }, [selectedTemplateId, selectedDatasetId, datasets]);
 
   useEffect(() => {
     if (isOpen) {
@@ -62,7 +141,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
         setDescription('');
         setSelectedImage(null);
         setSelectedDatasetId(''); 
-        setSelectedTemplateId('__AUTO__'); 
+        setSelectedTemplateId(-1); 
         setViewMode('preview');
         setError(null);
       }
@@ -83,11 +162,18 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
   };
 
   const handleTemplateSelect = (templateId: number | string) => {
-    setSelectedTemplateId(templateId);
-    
+    // If switching to Auto, check if we should preserve current input
     if (templateId === '__AUTO__') {
-       setName('');
-       setDescription('');
+       const currentTemplate = BASIC_WEB_COMPONENTS.find(t => t.id === selectedTemplateId);
+       
+       // Only clear if the current values match the template's defaults
+       // If user modified them (or if previous was Auto), keep them
+       if (currentTemplate) {
+           if (name === currentTemplate.name) setName('');
+           if (description === currentTemplate.description) setDescription('');
+       }
+       // If no current template (was Auto or Empty), keep values as is.
+
        setGeneratedResult(null);
        setViewMode('preview');
        setError(null);
@@ -105,6 +191,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
           setError(null);
        }
     }
+    setSelectedTemplateId(templateId);
   };
 
   const handleGenerate = async () => {
@@ -124,14 +211,16 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
     setGeneratedResult(null);
     
     try {
-      const imageBase64 = selectedImage ? selectedImage.split(',')[1] : undefined;
+      // Send full Data URL (including data:image/...;base64 prefix)
+      const imageBase64 = selectedImage;
       const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
       
       const result = await apiService.aiGenerateWebComponent(
         description,
         imageBase64,
         selectedDataset?.previewData,
-        templateCode
+        templateCode,
+        fieldMapping
       );
       
       setGeneratedResult(result);
@@ -173,8 +262,6 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
       onClose();
     }
   };
-
-  const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
 
   const getTemplateIcon = (id: number | string) => {
     // Map negative IDs from BASIC_WEB_COMPONENTS to icons
@@ -234,18 +321,6 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                         基础模板 (可选)
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                         <button
-                            onClick={() => handleTemplateSelect('__AUTO__')}
-                            className={`flex items-center gap-2 p-2 rounded-lg text-xs transition-all text-left border ${
-                               selectedTemplateId === '__AUTO__'
-                                  ? 'bg-purple-50 border-purple-400 text-purple-700 ring-1 ring-purple-400'
-                                  : 'bg-white border-slate-200 hover:border-purple-300 hover:text-purple-600 text-slate-600'
-                            }`}
-                         >
-                            <Wand2 className="w-3 h-3 shrink-0" />
-                            <span className="truncate">自动 (AI 生成)</span>
-                         </button>
-
                          {BASIC_WEB_COMPONENTS.map(t => {
                             const isSelected = selectedTemplateId === t.id;
                             return (
@@ -305,62 +380,59 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                    </p>
                  </div>
 
-                 <div className="w-full h-px bg-slate-200 my-1" />
+                 {/* Field Mapping Section */}
+                 {selectedDatasetId && selectedTemplateId !== '__AUTO__' && Object.keys(fieldMapping).length > 0 && (
+                   <>
+                     <div className="w-full h-px bg-slate-200 my-1" />
+                     <div>
+                       <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                         <LinkIcon className="w-4 h-4 text-orange-500" />
+                         字段映射
+                       </label>
+                       <div className="space-y-2">
+                         {Object.keys(fieldMapping).map(reqField => (
+                           <div key={reqField} className="flex items-center justify-between text-sm">
+                             <div className="flex flex-col">
+                                <span className="text-slate-600 font-medium text-xs">{reqField}</span>
+                                <span className="text-[10px] text-slate-400">组件字段</span>
+                             </div>
+                             <ArrowRight className="w-3 h-3 text-slate-300 mx-2" />
+                             {reqField === 'type' ? (
+                               <select
+                                 value={fieldMapping[reqField]}
+                                 onChange={(e) => setFieldMapping(prev => ({ ...prev, [reqField]: e.target.value }))}
+                                 className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none bg-white min-w-0"
+                               >
+                                  <option value="__CONST__:info">Info (提示)</option>
+                                  <option value="__CONST__:success">Success (成功)</option>
+                                  <option value="__CONST__:warning">Warning (警告)</option>
+                                  <option value="__CONST__:error">Error (错误)</option>
+                               </select>
+                             ) : (
+                               <select
+                                 value={fieldMapping[reqField]}
+                                 onChange={(e) => setFieldMapping(prev => ({ ...prev, [reqField]: e.target.value }))}
+                                 className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none bg-white min-w-0"
+                               >
+                                 <option value="">-- 选择字段 --</option>
+                                 {datasets.find(d => d.id === selectedDatasetId)?.previewData?.columns.map(col => (
+                                   <option key={col.name} value={col.name}>{col.alias || col.name}</option>
+                                 ))}
+                               </select>
+                             )}
+                           </div>
+                         ))}
+                       </div>
+                       <p className="text-[10px] text-slate-500 mt-2">
+                         将数据集的字段映射到组件所需的字段。
+                       </p>
+                     </div>
+                   </>
+                 )}
 
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">组件名称</label>
-                   <input
-                     type="text"
-                     value={name}
-                     onChange={(e) => setName(e.target.value)}
-                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm"
-                     placeholder="例如: UserCard"
-                   />
-                 </div>
 
-                 <div>
-                   <label className="block text-sm font-medium text-slate-700 mb-1">需求描述 (AI)</label>
-                   <textarea 
-                     value={description}
-                     onChange={(e) => setDescription(e.target.value)}
-                     className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none resize-none text-sm"
-                     placeholder="例如：创建一个用户资料卡片，包含头像、姓名、职位和一组社交链接按钮..."
-                   />
-                 </div>
 
-                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">参考图片 (可选)</label>
-                    <div className="flex items-center gap-2">
-                       <button 
-                         onClick={() => fileInputRef.current?.click()}
-                         className="flex-1 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-                       >
-                         <ImageIcon className="w-4 h-4" />
-                         {selectedImage ? '更换' : '上传'}
-                       </button>
-                       <input 
-                         type="file" 
-                         ref={fileInputRef} 
-                         className="hidden" 
-                         accept="image/*"
-                         onChange={handleImageSelect}
-                       />
-                       {selectedImage && (
-                         <div className="relative w-10 h-10 rounded border border-slate-200 overflow-hidden shrink-0">
-                            <img src={selectedImage} alt="ref" className="w-full h-full object-cover" />
-                         </div>
-                       )}
-                    </div>
-                 </div>
 
-                 <button 
-                   onClick={handleGenerate}
-                   disabled={isGenerating || (!description.trim() && !selectedImage)}
-                   className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-lg font-medium shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
-                 >
-                   {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                   {initialComponent ? '重新生成' : '开始生成'}
-                 </button>
                  
                  {error && (
                     <div className="p-3 bg-red-50 text-red-600 text-xs rounded-lg flex items-start gap-2">
@@ -392,17 +464,100 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                          >
                            <Code className="w-3 h-3 inline-block mr-1" /> 代码
                          </button>
+                         {BASIC_WEB_COMPONENTS.find(t => t.id === selectedTemplateId)?.dataExample && (
+                           <button 
+                             onClick={() => setViewMode('example')}
+                             className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${viewMode === 'example' ? 'bg-white shadow text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}
+                           >
+                             <FileText className="w-3 h-3 inline-block mr-1" /> 示例
+                           </button>
+                         )}
                       </div>
                    </div>
 
                    <div className="flex-1 overflow-auto p-8 relative">
                       {viewMode === 'preview' ? (
                          <div className="w-full h-full flex items-center justify-center bg-white border border-slate-200 shadow-sm rounded-lg p-6" ref={previewRef}>
-                            <WebComponentRenderer code={generatedResult.code} data={selectedDataset?.previewData} />
+                            <WebComponentRenderer code={generatedResult.code} data={mappedData} />
                          </div>
-                      ) : (
+                      ) : viewMode === 'code' ? (
                          <div className="w-full h-full bg-slate-900 rounded-lg p-4 overflow-auto">
                             <pre className="text-sm font-mono text-emerald-400 whitespace-pre-wrap">{generatedResult.code}</pre>
+                         </div>
+                      ) : (
+                         <div className="w-full h-full bg-slate-50 rounded-lg p-6 overflow-auto border border-slate-200">
+                            <div className="max-w-3xl mx-auto">
+                               <div className="flex items-center gap-2 mb-4">
+                                  <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                                     <FileText className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                     <h4 className="font-semibold text-slate-800">数据结构示例</h4>
+                                     <p className="text-xs text-slate-500">此组件期望的数据格式如下</p>
+                                  </div>
+                               </div>
+                               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                                  {(() => {
+                                     const template = BASIC_WEB_COMPONENTS.find(t => t.id === selectedTemplateId);
+                                     if (template?.structuredExample) {
+                                        return (
+                                           <div className="flex flex-col gap-6">
+                                              {template.structuredExample.table && (
+                                                 <div>
+                                                    <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">表格结构 (Table)</h5>
+                                                    <div className="overflow-hidden rounded-lg border border-slate-200">
+                                                       <table className="w-full text-sm text-left">
+                                                          <thead className="bg-slate-50 text-slate-700 font-semibold">
+                                                             <tr>
+                                                                {template.structuredExample.table.headers.map((h, i) => (
+                                                                   <th key={i} className="px-4 py-2 border-b border-slate-200">{h}</th>
+                                                                ))}
+                                                             </tr>
+                                                          </thead>
+                                                          <tbody className="divide-y divide-slate-100">
+                                                             {template.structuredExample.table.rows.map((row, i) => (
+                                                                <tr key={i} className="hover:bg-slate-50">
+                                                                   {row.map((cell, j) => (
+                                                                      <td key={j} className="px-4 py-2 text-slate-600">{cell}</td>
+                                                                   ))}
+                                                                </tr>
+                                                             ))}
+                                                          </tbody>
+                                                       </table>
+                                                    </div>
+                                                 </div>
+                                              )}
+
+                                              {template.structuredExample.json && (
+                                                <div>
+                                                   <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">JSON 数据</h5>
+                                                   <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 font-mono text-xs text-slate-700 overflow-auto">
+                                                      <pre>{JSON.stringify(template.structuredExample.json, null, 2)}</pre>
+                                                   </div>
+                                                </div>
+                                             )}
+
+                                             {template.structuredExample.sql && (
+                                                <div>
+                                                   <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">SQL 示例</h5>
+                                                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 font-mono text-xs text-emerald-400 overflow-auto">
+                                                      <pre>{template.structuredExample.sql}</pre>
+                                                   </div>
+                                                </div>
+                                             )}
+
+                                             {template.structuredExample.description && (
+                                                 <div className="text-xs text-slate-500 bg-blue-50 text-blue-700 p-3 rounded-lg whitespace-pre-wrap">
+                                                    {template.structuredExample.description}
+                                                 </div>
+                                              )}
+                                           </div>
+                                        );
+                                     }
+                                     return <pre className="text-sm font-mono text-slate-600 whitespace-pre-wrap">{template?.dataExample}</pre>;
+                                  })()}
+                               </div>
+                            </div>
                          </div>
                       )}
                    </div>

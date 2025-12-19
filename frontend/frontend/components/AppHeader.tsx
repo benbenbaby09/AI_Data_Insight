@@ -167,6 +167,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                         <LayoutTemplate className="w-4 h-4 text-slate-500" />
                         部件管理
                      </button>
+                     <button 
+                        onClick={() => {
+                          setCurrentView('template-management');
+                          setIsDataAssetsMenuOpen(false);
+                        }}
+                        className={`w-full text-left px-2 py-2 text-sm hover:bg-slate-50 rounded flex items-center gap-2 ${currentView === 'template-management' ? 'bg-blue-50 text-blue-600' : 'text-slate-700'}`}
+                     >
+                        <LayoutTemplate className="w-4 h-4 text-slate-500" />
+                        模板管理
+                     </button>
                      
                      <div className="my-1 border-t border-slate-100"></div>
                      

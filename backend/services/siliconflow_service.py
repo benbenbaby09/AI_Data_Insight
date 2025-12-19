@@ -17,7 +17,7 @@ if not logger.handlers:
     _h.setFormatter(_f)
     logger.addHandler(_h)
 
-def call_llm(messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+def call_llm(messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
     provider = "siliconflow"
     logger.info(f"LLM_REQUEST provider={provider} messages={len(messages)} schema={schema_hint or ''}")
     if not API_KEY:

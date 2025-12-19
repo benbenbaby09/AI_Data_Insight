@@ -17,7 +17,7 @@ if not logger.handlers:
     _h.setFormatter(_f)
     logger.addHandler(_h)
 
-def call_llm(messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+def call_llm(messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
     provider = "openrouter"
     logger.info(f"LLM_REQUEST provider={provider} messages={len(messages)} schema={schema_hint or ''}")
     if not API_KEY:
@@ -44,7 +44,8 @@ def call_llm(messages: List[Dict[str, str]], schema_hint: Optional[str] = None) 
         
     try:
         _start = time.time()
-        logger.info(f"LLM_REQUEST url={OPENROUTER_API_URL} model={DEFAULT_MODEL} messages={messages} schema={schema_hint or ''}")
+        # Avoid logging full message content which may contain base64 images
+        logger.info(f"LLM_REQUEST url={OPENROUTER_API_URL} model={DEFAULT_MODEL} messages_count={len(messages)} schema={schema_hint or ''}")
         resp = requests.post(OPENROUTER_API_URL, json=payload, headers=headers, timeout=120)
         resp.raise_for_status()
         data = resp.json()

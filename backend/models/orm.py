@@ -76,23 +76,19 @@ class Widget(Base):
     dashboard_associations = relationship("DashboardWidget", back_populates="widget", cascade="all, delete-orphan")
     dataset = relationship("Dataset", primaryjoin="foreign(Widget.datasetId) == Dataset.id", back_populates="widgets")
 
-# Deprecated - Moved to Widget
-# class WebComponentTemplate(Base):
-#     __tablename__ = "web_components"
-#     id = Column(Integer, primary_key=True, index=True)
-#     name = Column(String)
-#     description = Column(String)
-#     code = Column(String)
-#     createdAt = Column(BigInteger)
-
-# Deprecated - Moved to Widget
-# class ChartTemplate(Base):
-#     __tablename__ = "chart_templates"
-#     id = Column(Integer, primary_key=True, index=True)
-#     name = Column(String)
-#     description = Column(String)
-#     isCustom = Column(Boolean)
-#     type = Column(String)
-#     icon = Column(String)
-#     customSpec = Column(JSON, nullable=True)
-#     chartParams = Column(JSON, nullable=True)
+class Template(Base):
+    __tablename__ = "templates"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, index=True)
+    description = Column(String, nullable=True)
+    
+    type = Column(String) # 'bar', 'line', 'web-component', etc.
+    category = Column(String) # 'chart' or 'web'
+    
+    content = Column(String, nullable=True) # For web component code
+    config = Column(JSON, nullable=True) # For chart specs/params, or web component examples
+    
+    icon = Column(String, nullable=True)
+    
+    createdAt = Column(BigInteger)
+    updatedAt = Column(BigInteger, nullable=True)

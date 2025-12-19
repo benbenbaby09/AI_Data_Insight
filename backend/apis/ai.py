@@ -32,9 +32,10 @@ def generate_data_insight(payload: Dict[str, Any]):
 @router.post("/generate-web-component")
 def generate_web_component(payload: Dict[str, Any]):
     description: str = payload.get("description", "")
+    image_base64: Optional[str] = payload.get("imageBase64")
     context_data: Optional[Dict[str, Any]] = payload.get("contextData")
     template_code: Optional[str] = payload.get("templateCode")
-    return ai_service.generate_web_component(description, context_data, template_code)
+    return ai_service.generate_web_component(description, image_base64, context_data, template_code)
 
 @router.post("/generate-chart-template")
 def generate_chart_template(payload: Dict[str, Any]):

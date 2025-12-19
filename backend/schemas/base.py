@@ -50,6 +50,35 @@ class DataSource(DataSourceBase):
     class Config:
         from_attributes = True
 
+class TemplateBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    type: str
+    category: str # 'chart' or 'web'
+    content: Optional[str] = None
+    config: Optional[Any] = None
+    icon: Optional[str] = None
+
+class TemplateCreate(TemplateBase):
+    pass
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    category: Optional[str] = None
+    content: Optional[str] = None
+    config: Optional[Any] = None
+    icon: Optional[str] = None
+
+class Template(TemplateBase):
+    id: int
+    createdAt: int
+    updatedAt: Optional[int] = None
+    
+    class Config:
+        from_attributes = True
+
 class PreviewTableRequest(BaseModel):
     type: str
     host: str

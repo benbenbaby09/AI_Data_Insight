@@ -128,62 +128,174 @@ export const BASIC_WEB_COMPONENTS: WebComponentTemplate[] = [
     id: -1,
     name: '指标卡片',
     description: '展示关键业务指标，包含标题、数值和趋势图标。',
-    code: `const StatCard = () => {
-  // 定义数据
-  const title = "总销售额";
-  const value = "¥ 128,430";
-  const trend = "+12.5%";
-  const isPositive = true;
+    code: `const StatCard = ({ data }) => {
+  // 尝试从传入的数据中获取第一行，或者将多行数据合并
+  // 支持 rows: [{title: ...}, {value: ...}] 这种分散格式
+  const row = Array.isArray(data?.rows) 
+    ? data.rows.reduce((acc, curr) => ({ ...acc, ...curr }), {}) 
+    : (data?.rows?.[0] || {});
+  
+  // 定义默认值
+  const defaultTitle = "总销售额";
+  const defaultValue = "¥ 128,430";
+  
+  // 优先使用数据中的字段，否则使用默认值
+  // 支持的字段名包括：title/name, value/amount, trend/growth
+  const title = row.title || row.name || row.label || defaultTitle;
+  const value = row.value || row.amount || row.total || defaultValue;
+  const trend = row.trend || row.growth || row.change;
+  
+  // 自动判断涨跌状态
+  // 如果数据中有 isPositive 字段则直接使用
+  // 否则根据 trend 字符串是否以 '-' 开头或包含 '下降'/'跌' 来判断
+  let isPositive = true;
+  if (row.isPositive !== undefined) {
+    isPositive = row.isPositive;
+  } else if (typeof trend === 'string') {
+    if (trend.startsWith('-') || trend.includes('下降') || trend.includes('跌')) {
+      isPositive = false;
+    }
+  }
 
   return (
     <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between h-full hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-4">
         <span className="text-slate-500 text-sm font-medium">{title}</span>
-        <div className={\`p-2 rounded-lg \${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}\`}>
-          {isPositive ? <Lucide.TrendingUp className="w-4 h-4" /> : <Lucide.TrendingDown className="w-4 h-4" />}
-        </div>
+        {trend && (
+          <div className={\`p-2 rounded-lg \${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}\`}>
+            {isPositive ? <Lucide.TrendingUp className="w-4 h-4" /> : <Lucide.TrendingDown className="w-4 h-4" />}
+          </div>
+        )}
       </div>
       <div>
         <h3 className="text-3xl font-bold text-slate-800 mb-1">{value}</h3>
-        <p className={\`text-xs font-medium \${isPositive ? 'text-emerald-600' : 'text-red-600'}\`}>
-          较上月 {trend}
-        </p>
+        {trend && (
+          <p className={\`text-xs font-medium \${isPositive ? 'text-emerald-600' : 'text-red-600'}\`}>
+            较上月 {trend}
+          </p>
+        )}
       </div>
     </div>
   );
 };
 return StatCard;`,
-    createdAt: 0
+    createdAt: 0,
+    dataExample: `// 1. 表格结构示例 (Table Structure)
+// | title    | value     | trend   |
+// |----------|-----------|---------|
+// | 总销售额  | ¥ 128,430 | +12.5%  |
+
+// 2. 对应的 JSON 数据
+{
+  "rows": [
+    {
+      "title": "总销售额",
+      "value": "¥ 128,430", 
+      "trend": "+12.5%"
+    }
+  ]
+}
+// 说明：组件会自动合并 rows 数组中的所有对象。
+// 因此也支持将字段分散在多行中返回。`,
+    structuredExample: {
+      table: {
+        headers: ['title', 'value', 'trend'],
+        rows: [['总销售额', '¥ 128,430', '+12.5%']]
+      },
+      json: {
+        rows: [
+          { title: "总销售额", value: "¥ 128,430", trend: "+12.5%" }
+        ]
+      },
+      sql: "SELECT '总销售额' as title, '¥ 128,430' as value, '+12.5%' as trend",
+      description: '组件会自动合并 rows 数组中的所有对象。\n因此也支持将字段分散在多行中返回。'
+    }
   },
   {
     id: -2,
     name: '通用信息卡片',
     description: '标准的标题+内容卡片布局，适用于展示说明文字。',
-    code: `const InfoCard = () => {
+    code: `const InfoCard = ({ data }) => {
+  const row = data?.rows?.[0] || {};
+  const { title, content, link, type } = row;
+
+  // Defaults
+  const defaultTitle = "关于项目";
+  const defaultContent = "这是一个通用的信息展示卡片组件。您可以使用它来放置任何说明性文本、公告或者业务逻辑解释。";
+  
+  const displayTitle = title || defaultTitle;
+  const displayContent = content || defaultContent;
+
+  // Type configuration
+  const getTypeConfig = (t) => {
+    // Safely handle type, ensure it's a string
+    const safeT = String(t || 'info');
+    const lowerT = safeT.toLowerCase();
+    
+    if (lowerT.includes('warn') || lowerT.includes('alert')) return { icon: Lucide.AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-50/50', border: 'border-amber-100' };
+    if (lowerT.includes('error') || lowerT.includes('danger') || lowerT.includes('fail')) return { icon: Lucide.XCircle, color: 'text-red-500', bg: 'bg-red-50/50', border: 'border-red-100' };
+    if (lowerT.includes('success') || lowerT.includes('ok') || lowerT.includes('pass')) return { icon: Lucide.CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-50/50', border: 'border-emerald-100' };
+    return { icon: Lucide.Info, color: 'text-blue-500', bg: 'bg-slate-50/50', border: 'border-slate-100' };
+  };
+
+  const config = getTypeConfig(type);
+  const Icon = config.icon;
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full flex flex-col hover:shadow-md transition-shadow">
-      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
-        <Lucide.Info className="w-4 h-4 text-blue-500" />
-        <h3 className="font-semibold text-slate-800">关于项目</h3>
+      <div className={\`px-6 py-4 border-b \${config.border} \${config.bg} flex items-center gap-2\`}>
+        <Icon className={\`w-4 h-4 \${config.color}\`} />
+        <h3 className="font-semibold text-slate-800">{displayTitle}</h3>
       </div>
-      <div className="p-6 text-slate-600 text-sm leading-relaxed flex-1">
-        <p className="mb-4">
-          这是一个通用的信息展示卡片组件。您可以使用它来放置任何说明性文本、公告或者业务逻辑解释。
-        </p>
-        <p>
-          组件采用 Flex 布局，高度自适应容器，并带有优雅的边框和阴影效果。
-        </p>
+      <div className="p-6 text-slate-600 text-sm leading-relaxed flex-1 whitespace-pre-wrap">
+        {displayContent}
       </div>
-      <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 text-right">
-        <button className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors">
-          了解更多 &rarr;
-        </button>
-      </div>
+      {link && (
+        <div className={\`px-6 py-3 bg-slate-50 border-t \${config.border} text-right\`}>
+          <a 
+            href={link} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+          >
+            了解更多 <Lucide.ArrowRight className="w-3 h-3" />
+          </a>
+        </div>
+      )}
     </div>
   );
 };
 return InfoCard;`,
-    createdAt: 0
+    createdAt: 0,
+    dataExample: `// 1. 表格结构示例
+// | type    | title    | content                  | link |
+// |---------|----------|--------------------------|------|
+// | info    | 关于项目  | 这是一个通用的信息卡片... | http... |
+
+// 2. JSON 示例
+{
+  "rows": [
+    {
+      "type": "info",
+      "title": "关于项目",
+      "content": "这是一个通用的信息展示卡片组件...",
+      "link": "https://example.com"
+    }
+  ]
+}`,
+    structuredExample: {
+      table: {
+        headers: ['type', 'title', 'content', 'link'],
+        rows: [['info', '关于项目', '这是一个通用的信息展示卡片组件...', 'https://example.com']]
+      },
+      json: {
+        rows: [
+          { type: "info", title: "关于项目", content: "这是一个通用的信息展示卡片组件...", link: "https://example.com" }
+        ]
+      },
+      sql: "SELECT 'info' as type, '关于项目' as title, '内容...' as content, 'http...' as link",
+      description: '支持字段映射：\n- type: 控制图标颜色 (info/warning/success/error)\n- title: 卡片标题\n- content: 主要文本内容\n- link: 底部跳转链接'
+    }
   },
   {
     id: -3,
@@ -309,7 +421,13 @@ return InfoCard;`,
   );
 };
 return SimpleTable;`,
-    createdAt: 0
+    createdAt: 0,
+    dataExample: `// 此模板当前使用内部模拟数据 (initialRows)。
+// 如需对接外部数据，请修改代码：
+// const SimpleTable = ({ data }) => {
+//   const initialRows = data?.rows || [];
+//   ...
+// }`
   },
   {
     id: 'basic_image_banner',
@@ -397,7 +515,12 @@ return SimpleTable;`,
   );
 };
 return ImageBanner;`,
-    createdAt: 0
+    createdAt: 0,
+    dataExample: `// 此组件不依赖外部数据源 (Data Source)。
+// 所有内容通过配置参数 (Config/Params) 控制：
+// - image: 背景图片 URL 或 Base64
+// - title: 标题文本
+// - description: 描述文本`
   }
 ];
 

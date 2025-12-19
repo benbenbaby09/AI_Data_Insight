@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, ChevronLeft, ChevronRight, Table as TableIcon, Code } from 'lucide-react';
-import { TableData, DatabaseConfig } from '../types';
+import { TableData, DatabaseConfig, Column } from '../types';
 import { apiService } from '../services/api';
 
 interface TablePreviewModalProps {
@@ -57,9 +57,28 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
     fetchPreview();
   }, [isOpen, table?.name, dbConfig]);
 
+  const effectiveRows = useMemo(() => rows.length > 0 ? rows : (table?.rows || []), [rows, table?.rows]);
+  
+  // Dynamically calculate columns if table.columns is empty but we have data
+  const displayColumns = useMemo(() => {
+    if (!table) return [];
+    if (table.columns && table.columns.length > 0) {
+      return table.columns;
+    }
+    // Infer columns from first row of data
+    if (effectiveRows.length > 0) {
+      const firstRow = effectiveRows[0];
+      return Object.keys(firstRow).map(key => ({
+        name: key,
+        type: (typeof firstRow[key] === 'number' ? 'number' : 'string') as 'number' | 'string',
+        alias: key
+      }));
+    }
+    return [];
+  }, [table, effectiveRows]);
+
   if (!isOpen || !table) return null;
 
-  const effectiveRows = rows.length > 0 ? rows : (table.rows || []);
   const totalRows = effectiveRows.length;
   const totalPages = Math.ceil(totalRows / PAGE_SIZE);
   const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -118,7 +137,7 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
                 <th className="px-6 py-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider w-16 text-center">
                   #
                 </th>
-                {table.columns.map((col) => (
+                {displayColumns.map((col) => (
                   <th key={col.name} className="px-6 py-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-700">{col.alias || col.name}</span>
@@ -134,14 +153,14 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
             <tbody className="divide-y divide-slate-100">
               {currentRows.length > 0 ? (
                 loading ? (
-                  <tr><td colSpan={table.columns.length + 1} className="px-6 py-12 text-center text-slate-400">正在加载数据...</td></tr>
+                  <tr><td colSpan={displayColumns.length + 1} className="px-6 py-12 text-center text-slate-400">正在加载数据...</td></tr>
                 ) : (
                 currentRows.map((row, idx) => (
                   <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
                     <td className="px-6 py-3 text-slate-400 text-xs text-center border-r border-slate-50">
                       {startIndex + idx + 1}
                     </td>
-                    {table.columns.map((col) => (
+                    {displayColumns.map((col) => (
                       <td key={`${idx}-${col.name}`} className="px-6 py-3 whitespace-nowrap max-w-xs truncate">
                         {(() => {
                           const exact = row[col.name];
@@ -163,7 +182,7 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
                 )))
               ) : (
                 <tr>
-                  <td colSpan={table.columns.length + 1} className="px-6 py-12 text-center text-slate-400 italic">
+                  <td colSpan={displayColumns.length + 1} className="px-6 py-12 text-center text-slate-400 italic">
                     表中暂无数据
                   </td>
                 </tr>

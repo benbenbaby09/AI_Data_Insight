@@ -110,6 +110,16 @@ export interface WebComponentTemplate {
   code: string; // The raw React component code (JSX)
   datasetId?: number; // Optional bound dataset
   createdAt: number;
+  dataExample?: string; // Example of the data structure expected by the component
+  structuredExample?: {
+    table?: {
+      headers: string[];
+      rows: (string | number)[][];
+    };
+    json?: any;
+    sql?: string;
+    description?: string;
+  };
 }
 
 export interface ChatMessage {

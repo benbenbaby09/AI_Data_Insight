@@ -46,7 +46,8 @@ import { MOCK_AVAILABLE_TABLES, BASIC_WEB_COMPONENTS } from './constants';
 // Component Imports
 import { DataSourceManager } from './components/DataSourceManager';
 import { DatasetManager } from './components/DatasetManager';
-import { UnifiedComponentManager } from './components/UnifiedComponentManager';
+import { TemplateManager } from './components/TemplateManager';
+import { ComponentManager } from './components/ComponentManager';
 import { DashboardManager } from './components/DashboardManager';
 import { ReportHistoryManager } from './components/ReportHistoryManager';
 import { DatabaseConfigModal } from './components/DatabaseConfigModal';
@@ -77,6 +78,7 @@ export default function App() {
       if (path.includes('/management/datasets')) return 'datasets';
       if (path.includes('/management/history-reports')) return 'history-reports';
       if (path.includes('/management/component-management')) return 'component-management';
+      if (path.includes('/management/template-management')) return 'template-management';
       if (path.includes('/management/dashboard-management')) return 'dashboard-management';
       return 'dashboard';
   };
@@ -90,6 +92,7 @@ export default function App() {
         case 'datasets': navigate('/management/datasets'); break;
         case 'history-reports': navigate('/management/history-reports'); break;
         case 'component-management': navigate('/management/component-management'); break;
+        case 'template-management': navigate('/management/template-management'); break;
         case 'dashboard-management': navigate('/management/dashboard-management'); break;
         default: navigate('/');
       }
@@ -715,6 +718,15 @@ export default function App() {
     }
   };
 
+  const handleDeleteSavedComponent = async (id: number) => {
+    try {
+      await apiService.deleteSavedComponent(id);
+      setSavedComponents(prev => prev.filter(c => c.id !== id));
+    } catch (err) {
+      console.error("Failed to delete saved component", err);
+    }
+  };
+
   // Dashboard Widget Logic
   const addDashboardWidget = async (config: ChartConfig, tableName: string, overrideTableId?: number) => {
     if (!activeDashboardId) return;
@@ -1191,7 +1203,16 @@ export default function App() {
         } />
 
         <Route path="/management/component-management" element={
-          <UnifiedComponentManager 
+          <ComponentManager 
+            components={savedComponents}
+            datasets={datasets}
+            onBack={() => setCurrentView('dashboard')}
+            onDelete={handleDeleteSavedComponent}
+          />
+        } />
+
+        <Route path="/management/template-management" element={
+          <TemplateManager 
             chartTemplates={chartTemplates}
             webComponents={webComponents}
             datasets={datasets}

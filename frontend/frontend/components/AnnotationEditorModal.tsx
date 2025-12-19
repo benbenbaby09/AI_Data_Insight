@@ -21,7 +21,9 @@ import {
   Eye,
   Sparkles,
   Loader2,
-  StopCircle
+  StopCircle,
+  Download,
+  Upload
 } from 'lucide-react';
 import { DataSource, TableData, Column } from '../types';
 // duplicate import removed
@@ -405,6 +407,82 @@ export const AnnotationEditorModal: React.FC<AnnotationEditorModalProps> = ({
     }
   };
 
+  const handleExportTable = (table: TableData) => {
+    // Only export essential configuration
+    const exportData = {
+        name: table.name,
+        description: table.description,
+        columns: (table.columns || []).map(c => ({
+            name: c.name,
+            alias: c.alias,
+            description: c.description
+        }))
+    };
+    
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${table.name}_annotation.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportTable = (event: React.ChangeEvent<HTMLInputElement>, targetTableId: number) => {
+     const file = event.target.files?.[0];
+     if (!file) return;
+
+     const reader = new FileReader();
+     reader.onload = (e) => {
+        try {
+           const json = JSON.parse(e.target?.result as string);
+           
+           if (!json.columns || !Array.isArray(json.columns)) {
+               alert("导入失败：文件格式不正确，缺少列定义");
+               return;
+           }
+
+           setTables(prev => prev.map(t => {
+               if (t.id === targetTableId) {
+                   // Merge logic:
+                   // Update table description
+                   // Update columns aliases and descriptions
+                   const newDescription = json.description || t.description;
+                   
+                   const newColumns = (t.columns || []).map(col => {
+                       const importedCol = json.columns.find((c: any) => c.name === col.name);
+                       if (importedCol) {
+                           return {
+                               ...col,
+                               alias: importedCol.alias || col.alias,
+                               description: importedCol.description || col.description
+                           };
+                       }
+                       return col;
+                   });
+                   
+                   return {
+                       ...t,
+                       description: newDescription,
+                       columns: newColumns
+                   };
+               }
+               return t;
+           }));
+           alert(`表 ${json.name || ''} 标注导入成功`);
+        } catch (err) {
+           console.error("Import failed", err);
+           alert("导入失败：文件无法解析");
+        }
+     };
+     reader.readAsText(file);
+     // Reset input
+     event.target.value = '';
+  };
+
   const handleSave = () => {
     onSave(dataSource.id, dsDescription, tables);
     onClose();
@@ -653,6 +731,26 @@ export const AnnotationEditorModal: React.FC<AnnotationEditorModalProps> = ({
                             </div>
                             
                             <div className="flex items-center gap-1">
+                               {/* Export Button */}
+                               <button
+                                  onClick={() => handleExportTable(table)}
+                                  className="text-slate-300 hover:text-indigo-500 p-1 rounded hover:bg-indigo-50 transition-colors"
+                                  title="导出配置"
+                               >
+                                  <Download className="w-4 h-4" />
+                               </button>
+
+                               {/* Import Button */}
+                               <label className="text-slate-300 hover:text-indigo-500 p-1 rounded hover:bg-indigo-50 transition-colors cursor-pointer flex items-center justify-center" title="导入配置">
+                                   <Upload className="w-4 h-4" />
+                                   <input 
+                                       type="file" 
+                                       accept=".json" 
+                                       className="hidden" 
+                                       onChange={(e) => handleImportTable(e, table.id)} 
+                                   />
+                               </label>
+
                                {/* Preview Button (Right) */}
                                <button
                                   onClick={() => setPreviewTable(table)}

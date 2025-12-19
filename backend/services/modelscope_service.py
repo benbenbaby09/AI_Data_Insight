@@ -29,13 +29,14 @@ except Exception:
     RETRIES = int(os.getenv("MODELSCOPE_RETRIES", os.getenv("SILICONFLOW_RETRIES", "2")))
     BACKOFF = float(os.getenv("MODELSCOPE_BACKOFF", os.getenv("SILICONFLOW_BACKOFF", "0.5")))
 
-def call_llm(messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+def call_llm(messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
     if not API_KEY:
         return {"error": "Missing MODELSCOPE_API_KEY"}
     extra_body: Dict[str, Any] = {"enable_thinking": ENABLE_THINKING}
     try:
         _start = time.time()
-        logger.info(f"LLM_REQUEST provider=modelscope base_url={MODELSCOPE_BASE_URL} model={DEFAULT_MODEL} messages={messages} schema={schema_hint or ''}")
+        # Avoid logging full message content which may contain base64 images
+        logger.info(f"LLM_REQUEST provider=modelscope base_url={MODELSCOPE_BASE_URL} model={DEFAULT_MODEL} messages_count={len(messages)} schema={schema_hint or ''}")
         if _OPENAI_AVAILABLE:
             client = OpenAI(base_url=MODELSCOPE_BASE_URL, api_key=API_KEY)
             resp = client.chat.completions.create(

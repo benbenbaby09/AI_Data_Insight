@@ -13,7 +13,8 @@ from backend.apis import (
     web_component_router,
     chart_template_router,
     ai_router,
-    saved_component_router
+    saved_component_router,
+    template_router
 )
 
 app = FastAPI()
@@ -35,6 +36,7 @@ app.include_router(web_component_router)
 app.include_router(chart_template_router)
 app.include_router(ai_router)
 app.include_router(saved_component_router)
+app.include_router(template_router, prefix="/api/templates", tags=["templates"])
 
 if __name__ == "__main__":
     import uvicorn

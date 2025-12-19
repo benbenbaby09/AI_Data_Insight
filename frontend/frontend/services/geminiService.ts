@@ -451,10 +451,10 @@ export const generateWebComponent = async (
 
   // Construct Context Data Prompt
   let contextInstruction = "";
-  if (contextData) {
-     const sampleData = JSON.stringify(contextData.rows.slice(0, 15)); // Provide more rows for component preview
-     const schema = JSON.stringify(contextData.columns);
-     contextInstruction = `
+    if (contextData) {
+       const sampleData = JSON.stringify(contextData.rows.slice(0, 15)); // Provide more rows for component preview
+       const schema = JSON.stringify(contextData.columns);
+       contextInstruction = `
        CONTEXT DATASET:
        - Table Name: ${contextData.name}
        - Schema: ${schema}
@@ -466,7 +466,20 @@ export const generateWebComponent = async (
        3. IMPORTANT: The 'Sample Data' provided above is a JSON string. When embedding it into your code, ensure you treat it as a valid JavaScript Object Literal. BE VERY CAREFUL with escaping quotes. If a value in the JSON contains a double quote (e.g., "Monitor 27\\""), ensure the generated code preserves the escape sequence so the code is syntactically valid.
        4. Adapt the UI (Table, Card Grid, Kanban, etc.) to best visualize this specific dataset structure.
      `;
-  }
+    } else if (description.includes("指标卡片") || description.includes("StatCard")) {
+      // Special case for StatCard without bound dataset
+      // Force use of the example data structure
+      contextInstruction = `
+      CONTEXT DATASET:
+      - Sample Data: {"rows":[{"title":342013},{"trend":"+12.5%"}]}
+
+      INSTRUCTIONS:
+      1. You MUST use the provided 'Sample Data' to populate the component.
+      2. CRITICAL: Define a variable 'const data = {"rows":[{"title":342013},{"trend":"+12.5%"}]};' inside the component.
+      3. The component should handle this specific data structure where fields might be distributed across different rows in the array.
+      4. Ensure the component logic handles data.rows array merging or accessing correctly.
+      `;
+    }
 
   promptParts.push({
     text: `

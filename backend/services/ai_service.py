@@ -12,21 +12,21 @@ if not logger.handlers:
     logger.addHandler(_h)
 
 class LLMStrategy:
-    def call(self, messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+    def call(self, messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
         raise NotImplementedError
 
 class SiliconFlowStrategy(LLMStrategy):
-    def call(self, messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+    def call(self, messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
         from backend.services.siliconflow_service import call_llm as sf_call
         return sf_call(messages, schema_hint)
 
 class ModelScopeStrategy(LLMStrategy):
-    def call(self, messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+    def call(self, messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
         from backend.services.modelscope_service import call_llm as ms_call
         return ms_call(messages, schema_hint)
 
 class OpenRouterStrategy(LLMStrategy):
-    def call(self, messages: List[Dict[str, str]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
+    def call(self, messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
         from backend.services.openrouter_service import call_llm as or_call
         return or_call(messages, schema_hint)
 
@@ -40,7 +40,7 @@ def get_strategy() -> LLMStrategy:
     provider = os.getenv("AI_PROVIDER", "siliconflow").lower()
     return STRATEGY_REGISTRY.get(provider, STRATEGY_REGISTRY["siliconflow"])
 
-def _call_llm(messages: List[Dict[str, str]], schema_hint: Optional[str] = None, provider_override: Optional[str] = None) -> Dict[str, Any]:
+def _call_llm(messages: List[Dict[str, Any]], schema_hint: Optional[str] = None, provider_override: Optional[str] = None) -> Dict[str, Any]:
     strategy = STRATEGY_REGISTRY.get(provider_override, get_strategy()) if provider_override else get_strategy()
     return strategy.call(messages, schema_hint)
 
@@ -60,7 +60,7 @@ def generate_dataset_sql(data_sources: List[Dict[str, Any]], user_query: str) ->
                 {
                     "name": t.get("name"),
                     "description": (t.get("description") or "")[:100],
-                    "columns": [{"name": c.get("name"), "type": c.get("type"), "description": c.get("description")} for c in t.get("columns", [])]
+                    "columns": [{"name": c.get("name"), "type": c.get("type"), "alias": c.get("alias"), "description": c.get("description")} for c in t.get("columns", [])]
                 }
                 for t in tables
             ]
@@ -154,7 +154,7 @@ def generate_chart_template(description: str, image_base64: Optional[str] = None
         return {"name": "AI图表", "description": "生成失败", "type": "bar", "customSpec": None}
     return result
 
-def generate_web_component(description: str, context_data: Optional[Dict[str, Any]] = None, template_code: Optional[str] = None) -> Dict[str, Any]:
+def generate_web_component(description: str, image_base64: Optional[str] = None, context_data: Optional[Dict[str, Any]] = None, template_code: Optional[str] = None) -> Dict[str, Any]:
     style_guide = """
     Style Guide (Tailwind CSS):
     - Container: w-full h-full bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col
@@ -181,9 +181,24 @@ def generate_web_component(description: str, context_data: Optional[Dict[str, An
     if template_code:
         template_instruction = f"\n\nHere is a base template code you MUST use as a starting point. Modify it according to the description, but keep the overall structure if possible:\n```jsx\n{template_code}\n```"
 
+    user_text = f"Create a reusable functional React component.\nDescription: {description}\n{ctx}{template_instruction}\nReturn JSON."
+    
+    if image_base64:
+        user_content = [
+            {"type": "text", "text": user_text},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_base64
+                }
+            }
+        ]
+    else:
+        user_content = user_text
+
     user = {
         "role": "user",
-        "content": f"Create a reusable functional React component.\nDescription: {description}\n{ctx}{template_instruction}\nReturn JSON."
+        "content": user_content
     }
     result = _call_llm([system, user], schema_hint="web_component", provider_override=_get_provider_override("web_component"))
     if "error" in result:

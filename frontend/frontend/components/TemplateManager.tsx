@@ -21,7 +21,7 @@ import { ChartTemplate, WebComponentTemplate, Dataset } from '../types';
 import { WebComponentBuilderModal } from './WebComponentBuilderModal';
 import { ChartBuilderModal } from './ChartBuilderModal';
 
-interface UnifiedComponentManagerProps {
+interface TemplateManagerProps {
   chartTemplates: ChartTemplate[];
   webComponents: WebComponentTemplate[];
   datasets: Dataset[];
@@ -36,7 +36,7 @@ interface UnifiedComponentManagerProps {
   onDeleteWebComponent: (id: number) => void;
 }
 
-export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = ({ 
+export const TemplateManager: React.FC<TemplateManagerProps> = ({ 
   chartTemplates,
   webComponents,
   datasets,
@@ -134,9 +134,9 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
           
           <div className="flex items-end justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">部件管理</h1>
+              <h1 className="text-2xl font-bold text-slate-900">模板管理</h1>
               <p className="text-slate-500 mt-1">
-                统一管理所有的图表部件和自定义 Web 部件。
+                统一管理所有的图表模板和自定义 Web 模板。
               </p>
             </div>
             
@@ -147,7 +147,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-lg font-medium shadow-lg shadow-purple-600/20 transition-all"
                 >
                   <Plus className="w-5 h-5" />
-                  新建图表部件
+                  新建图表模板
                 </button>
               ) : (
                 <button 
@@ -155,7 +155,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-lg font-medium shadow-lg shadow-indigo-600/20 transition-all"
                 >
                   <Plus className="w-5 h-5" />
-                  新建 Web 部件
+                  新建 Web 模板
                 </button>
               )}
             </div>
@@ -171,7 +171,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              图表部件
+              图表模板
               {activeTab === 'charts' && (
                 <div className="absolute bottom-0 left-0 w-full h-0.5 bg-purple-600 rounded-t-full" />
               )}
@@ -184,7 +184,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              Web 部件
+              Web 模板
               {activeTab === 'web-components' && (
                 <div className="absolute bottom-0 left-0 w-full h-0.5 bg-indigo-600 rounded-t-full" />
               )}
@@ -202,7 +202,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
              <Search className="absolute left-3 top-2.5 w-5 h-5 text-slate-400" />
              <input 
                type="text" 
-               placeholder={activeTab === 'charts' ? "搜索图表组件..." : "搜索 Web 组件..."}
+               placeholder={activeTab === 'charts' ? "搜索图表模板..." : "搜索 Web 模板..."}
                value={searchTerm}
                onChange={(e) => setSearchTerm(e.target.value)}
                className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none"
@@ -259,7 +259,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                                 </button>
                                 <button 
                                   onClick={() => {
-                                    if(window.confirm('确定要删除这个组件吗？')) onDeleteChart(t.id);
+                                    if(window.confirm('确定要删除这个模板吗？')) onDeleteChart(t.id);
                                   }}
                                   className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
                                   title="删除"
@@ -275,7 +275,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   ) : (
                     <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
-                        暂无图表组件
+                        暂无图表模板
                       </td>
                     </tr>
                   )
@@ -310,7 +310,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                             </button>
                             <button 
                               onClick={() => {
-                                if(window.confirm('确定要删除这个组件吗？')) onDeleteWebComponent(comp.id);
+                                if(window.confirm('确定要删除这个模板吗？')) onDeleteWebComponent(comp.id as number);
                               }}
                               className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
                               title="删除"
@@ -324,7 +324,7 @@ export const UnifiedComponentManager: React.FC<UnifiedComponentManagerProps> = (
                   ) : (
                     <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
-                        暂无 Web 组件
+                        暂无 Web 模板
                       </td>
                     </tr>
                   )

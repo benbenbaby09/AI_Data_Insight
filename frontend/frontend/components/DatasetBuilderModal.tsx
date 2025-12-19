@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Database, Wand2, Play, Save, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Loader2, Table as TableIcon, Check, Layers, Search, Eye, Copy } from 'lucide-react';
+import { X, Database, Wand2, Play, Save, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Loader2, Table as TableIcon, Check, Layers, Search, Eye, Copy, FileText, XCircle, Circle } from 'lucide-react';
 import { DataSource, TableData, Dataset } from '../types';
 import { apiService } from '../services/api';
 import { format } from 'sql-formatter';
+import { TableAnnotationModal } from './TableAnnotationModal';
+
+interface GenerationStep {
+    id: string;
+    label: string;
+    status: 'pending' | 'running' | 'success' | 'error';
+    message?: string;
+}
 
 interface DatasetBuilderModalProps {
   isOpen: boolean;
@@ -39,9 +47,11 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [previewTable, setPreviewTable] = useState<TableData | null>(null);
+  const [annotationTable, setAnnotationTable] = useState<TableData | null>(null);
   const [previewRows, setPreviewRows] = useState<any[]>([]);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [generationSteps, setGenerationSteps] = useState<GenerationStep[]>([]);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -227,6 +237,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
     if (selectedTableIds.length === 0) return;
     
     setIsGenerating(true);
+    setGenerationSteps([{ id: 'init', label: '正在准备上下文...', status: 'success' }]);
     
     // Filter data sources to only include selected tables for context
     // Since we now have single source
@@ -246,36 +257,46 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
     setErrorMsg(null);
     
     let attempts = 0;
-    const maxAttempts = 3;
+    const maxAttempts = 5; // Increased to 5 as per requirement
     let success = false;
+    let currentQuery = queryToSend;
+    let lastError = "";
+
+    // Initial Generation Step
+    setGenerationSteps(prev => [...prev, { id: 'gen-1', label: 'AI 生成 SQL (第 1 次尝试)', status: 'running' }]);
 
     while (attempts < maxAttempts && !success) {
         attempts++;
+        const currentStepId = attempts === 1 ? 'gen-1' : `gen-${attempts}`;
+        
         try {
-            console.log(`Generating SQL attempt ${attempts}/${maxAttempts} with:`, queryToSend);
-            const result = await apiService.aiGenerateDatasetSQL(relevantDataSources, queryToSend);
+            console.log(`Generating SQL attempt ${attempts}/${maxAttempts} with query:`, currentQuery);
+            if (attempts > 1) {
+                 // Update status to show retry
+                 setErrorMsg(`SQL 执行失败，正在尝试第 ${attempts} 次重新生成...`);
+                 
+                 // Add retry step if not already present (handled in previous loop iteration usually)
+            }
+            
+            // If this is a retry due to execution error, append the error to the query
+            const prompt = attempts === 1 ? currentQuery : `${currentQuery}\n\nPrevious generated SQL failed with error: ${lastError}. Please fix the SQL.`;
+
+            const result = await apiService.aiGenerateDatasetSQL(relevantDataSources, prompt);
             console.log("Generation result:", result);
             
+            // Mark generation as success
+            setGenerationSteps(prev => prev.map(s => s.id === currentStepId ? { ...s, status: 'success' } : s));
+
+            let generatedSqlCandidate = "";
+            let explanationCandidate = "";
+
             if (result && result.sql) {
-                try {
-                    const formattedSql = format(result.sql, { language: 'sql' });
-                    setGeneratedSql(formattedSql);
-                } catch (e) {
-                    console.warn("SQL Formatting failed, using raw SQL", e);
-                    setGeneratedSql(result.sql);
-                }
-                
-                setSqlExplanation(result.explanation);
-                // Ensure we are in a state that shows the SQL
-                if (step !== 'generate-query' && step !== 'select-source') {
-                    setStep('generate-query'); 
-                }
-                success = true;
+                generatedSqlCandidate = result.sql;
+                explanationCandidate = result.explanation;
             } else if (result && (result as any).content) {
-                // Fallback: Handle case where backend returned raw content due to parsing failure
-                try {
+                 // ... (fallback parsing logic same as before) ...
+                 try {
                     let content = (result as any).content;
-                    // Try to strip markdown if present
                     content = content.trim();
                     if (content.startsWith("```")) {
                         const firstLine = content.indexOf('\n');
@@ -283,42 +304,88 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                         if (content.endsWith("```")) content = content.substring(0, content.length - 3);
                     }
                     content = content.trim();
-                    
                     const parsed = JSON.parse(content);
                     if (parsed.sql) {
-                         try {
-                            const formattedSql = format(parsed.sql, { language: 'sql' });
-                            setGeneratedSql(formattedSql);
-                        } catch (e) {
-                            setGeneratedSql(parsed.sql);
-                        }
-                        setSqlExplanation(parsed.explanation || (result as any).reasoning || "");
-                         if (step !== 'generate-query' && step !== 'select-source') {
-                            setStep('generate-query'); 
-                        }
-                        success = true;
+                        generatedSqlCandidate = parsed.sql;
+                        explanationCandidate = parsed.explanation || (result as any).reasoning || "";
                     }
                 } catch (e) {
                     console.warn("Failed to parse fallback content", e);
                 }
             }
-            
-            if (!success) {
-                console.warn(`Attempt ${attempts} returned empty or invalid result`);
-                if (attempts < maxAttempts) {
-                    // Wait 1s before retry
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } else {
-                    console.error("Empty result from AI generation after max attempts", result);
-                    setErrorMsg("生成结果为空，已自动重试 3 次，请稍后重试");
+
+            if (generatedSqlCandidate) {
+                // Auto-Execute Test
+                const testStepId = `test-${attempts}`;
+                setGenerationSteps(prev => [...prev, { id: testStepId, label: '自动执行测试 SQL', status: 'running' }]);
+
+                console.log("Auto-testing generated SQL:", generatedSqlCandidate);
+                try {
+                    const payload = {
+                        type: activeDS.config.type,
+                        host: activeDS.config.host,
+                        port: activeDS.config.port,
+                        username: activeDS.config.username,
+                        password: activeDS.config.password,
+                        serviceName: activeDS.config.serviceName,
+                        database: (activeDS.config as any).database,
+                        sql: generatedSqlCandidate,
+                        limit: 1 // We only need to check if it runs
+                    };
+                    const execResult = await apiService.executeSql(payload);
+                    
+                    if (execResult.success) {
+                        // Success!
+                        setGenerationSteps(prev => prev.map(s => s.id === testStepId ? { ...s, status: 'success' } : s));
+                        
+                        try {
+                            const formattedSql = format(generatedSqlCandidate, { language: 'sql' });
+                            setGeneratedSql(formattedSql);
+                        } catch (e) {
+                            setGeneratedSql(generatedSqlCandidate);
+                        }
+                        setSqlExplanation(explanationCandidate);
+                         if (step !== 'generate-query' && step !== 'select-source') {
+                            setStep('generate-query'); 
+                        }
+                        success = true;
+                        setErrorMsg(null); // Clear any retry messages
+                    } else {
+                        // Execution failed
+                        console.warn("SQL Auto-test failed:", execResult.message);
+                        lastError = execResult.message || "Unknown SQL execution error";
+                        setGenerationSteps(prev => prev.map(s => s.id === testStepId ? { ...s, status: 'error', message: lastError } : s));
+                        // Don't set success, loop will continue
+                    }
+                } catch (execErr) {
+                    console.warn("SQL Auto-test exception:", execErr);
+                    lastError = execErr instanceof Error ? execErr.message : "Unknown execution exception";
+                    setGenerationSteps(prev => prev.map(s => s.id === testStepId ? { ...s, status: 'error', message: lastError } : s));
                 }
+            } else {
+                 console.warn(`Attempt ${attempts} returned empty or invalid result`);
+                 setGenerationSteps(prev => prev.map(s => s.id === currentStepId ? { ...s, status: 'error', message: '生成结果为空' } : s));
+            }
+            
+            if (!success && attempts < maxAttempts) {
+                // Prepare for next attempt
+                setGenerationSteps(prev => [...prev, { id: `gen-${attempts + 1}`, label: `AI 修正 SQL (第 ${attempts + 1} 次尝试)`, status: 'running' }]);
+                // Wait 1s before retry
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else if (!success && attempts >= maxAttempts) {
+                console.error("Failed to generate working SQL after max attempts");
+                setErrorMsg(`生成 SQL 失败，已重试 ${maxAttempts} 次。最后一次错误: ${lastError}`);
             }
         } catch (error) {
             console.error(`Attempt ${attempts} failed:`, error);
+            lastError = error instanceof Error ? error.message : "Unknown error";
+            setGenerationSteps(prev => prev.map(s => s.id === currentStepId ? { ...s, status: 'error', message: lastError } : s));
+            
             if (attempts < maxAttempts) {
+                setGenerationSteps(prev => [...prev, { id: `gen-${attempts + 1}`, label: `AI 修正 SQL (第 ${attempts + 1} 次尝试)`, status: 'running' }]);
                 await new Promise(resolve => setTimeout(resolve, 1000));
             } else {
-                setErrorMsg("生成 SQL 失败: " + (error instanceof Error ? error.message : "未知错误"));
+                setErrorMsg("生成 SQL 失败: " + lastError);
             }
         }
     }
@@ -551,6 +618,16 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
+                                                                setAnnotationTable(table);
+                                                            }}
+                                                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-100 rounded opacity-0 group-hover:opacity-100 mr-1"
+                                                            title="查看标注信息"
+                                                        >
+                                                            <FileText className="w-3 h-3" />
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
                                                                 setPreviewTable(table);
                                                             }}
                                                             className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded opacity-0 group-hover:opacity-100"
@@ -596,10 +673,44 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                           </button>
                        </div>
                        
-                       {errorMsg && (
-                           <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm border border-red-200 flex items-center gap-2">
-                               <AlertCircle className="w-4 h-4 shrink-0" />
-                               {errorMsg}
+                       {(generationSteps.length > 0 || errorMsg) && (
+                           <div className="flex flex-col gap-3 mb-2 p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-sm max-h-[300px] overflow-y-auto">
+                               {generationSteps.length > 0 && (
+                                   <div className="flex flex-col gap-2.5">
+                                       {generationSteps.map((step, idx) => (
+                                           <div key={step.id} className="flex items-start gap-3 text-sm animate-in fade-in slide-in-from-left-2 duration-300">
+                                               <div className="mt-0.5 shrink-0 relative">
+                                                   {step.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />}
+                                                   {step.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                                                   {step.status === 'error' && <XCircle className="w-4 h-4 text-red-500" />}
+                                                   {step.status === 'pending' && <Circle className="w-4 h-4 text-slate-300" />}
+                                               </div>
+                                               <div className="flex flex-col min-w-0 flex-1">
+                                                   <span className={`font-medium ${
+                                                       step.status === 'error' ? 'text-red-600' : 
+                                                       step.status === 'success' ? 'text-slate-700' : 
+                                                       step.status === 'running' ? 'text-indigo-600' :
+                                                       'text-slate-500'
+                                                   }`}>
+                                                       {step.label}
+                                                   </span>
+                                                   {step.message && (
+                                                       <span className="text-xs text-red-500 mt-1 bg-red-50 p-2 rounded border border-red-100 block break-words font-mono">
+                                                           {step.message}
+                                                       </span>
+                                                   )}
+                                               </div>
+                                           </div>
+                                       ))}
+                                   </div>
+                               )}
+                               
+                               {errorMsg && (
+                                   <div className={`text-sm flex items-center gap-2 ${generationSteps.length > 0 ? 'pt-2 border-t border-slate-200 mt-1' : ''} text-red-600`}>
+                                       <AlertCircle className="w-4 h-4 shrink-0" />
+                                       {errorMsg}
+                                   </div>
+                               )}
                            </div>
                        )}
 
@@ -776,9 +887,26 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                         </div>
                       </div>
                       
-                      <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs text-slate-500">
-                         <p className="font-semibold text-slate-700 mb-1">SQL 查询</p>
-                         <p className="font-mono bg-slate-50 p-2 rounded border border-slate-100 line-clamp-4">{generatedSql}</p>
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs text-slate-500 flex flex-col min-h-[200px]">
+                         <div className="flex justify-between items-center mb-1">
+                            <p className="font-semibold text-slate-700">SQL 查询</p>
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(generatedSql);
+                                }}
+                                className="text-slate-400 hover:text-blue-600 transition-colors"
+                                title="复制 SQL"
+                            >
+                                <Copy className="w-3.5 h-3.5" />
+                            </button>
+                         </div>
+                         <div className="relative flex-1 min-h-0">
+                            <textarea 
+                                readOnly
+                                value={generatedSql}
+                                className="w-full h-full font-mono bg-slate-50 p-2 rounded border border-slate-100 resize-none outline-none focus:ring-1 focus:ring-blue-500 text-slate-600"
+                            />
+                         </div>
                       </div>
                    </div>
 
@@ -903,6 +1031,12 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
           </div>
         </div>
       </div>
+
+      <TableAnnotationModal 
+        isOpen={!!annotationTable}
+        onClose={() => setAnnotationTable(null)}
+        table={annotationTable}
+      />
     </div>
   );
 };

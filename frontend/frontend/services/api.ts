@@ -66,8 +66,8 @@ export const apiService = {
         api.post<{ columnName: string, alias: string, description: string }[]>('/ai/generate-table-annotations', { tableName, tableDescription, columns }).then(res => res.data),
     aiGenerateDataInsight: (payload: { tables: any[], userQuery: string, referenceContext?: any }) =>
         api.post<{ explanation: string; chartConfig?: any; webComponent?: { name: string; code: string } }>('/ai/generate-data-insight', payload).then(res => res.data),
-    aiGenerateWebComponent: (description: string, imageBase64?: string, contextData?: any, templateCode?: string) =>
-        api.post<{ name: string; description: string; code: string }>('/ai/generate-web-component', { description, imageBase64, contextData, templateCode }).then(res => res.data),
+    aiGenerateWebComponent: (description: string, imageBase64?: string, contextData?: any, templateCode?: string, fieldMapping?: Record<string, string>) =>
+        api.post<{ name: string; description: string; code: string }>('/ai/generate-web-component', { description, imageBase64, contextData, templateCode, fieldMapping }).then(res => res.data),
     aiGenerateChartTemplate: (description: string, imageBase64?: string) =>
         api.post<{ name: string; description: string; type: ChartTemplate['type']; customSpec: any; chartParams?: any }>(
             '/ai/generate-chart-template',

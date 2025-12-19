@@ -154,7 +154,7 @@ def generate_chart_template(description: str, image_base64: Optional[str] = None
         return {"name": "AI图表", "description": "生成失败", "type": "bar", "customSpec": None}
     return result
 
-def generate_web_component(description: str, context_data: Optional[Dict[str, Any]] = None, template_code: Optional[str] = None) -> Dict[str, Any]:
+def generate_web_component(description: str, context_data: Optional[Dict[str, Any]] = None, template_code: Optional[str] = None, field_mapping: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     style_guide = """
     Style Guide (Tailwind CSS):
     - Container: w-full h-full bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col
@@ -176,6 +176,8 @@ def generate_web_component(description: str, context_data: Optional[Dict[str, An
     if context_data:
         sample = (context_data.get("rows") or [])[:15]
         ctx = f"Context table {context_data.get('name')} sample rows: {sample} with columns {context_data.get('columns')}."
+        if field_mapping:
+            ctx += f"\nFIELD MAPPING: Use these mappings to bind data columns to component fields: {field_mapping}.\nWhen generating the component, ensure you extract data using the DATASET COLUMN names provided in the mapping, but display/use them as the COMPONENT FIELD names."
     
     template_instruction = ""
     if template_code:

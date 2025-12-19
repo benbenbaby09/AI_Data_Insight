@@ -34,7 +34,8 @@ def generate_web_component(payload: Dict[str, Any]):
     description: str = payload.get("description", "")
     context_data: Optional[Dict[str, Any]] = payload.get("contextData")
     template_code: Optional[str] = payload.get("templateCode")
-    return ai_service.generate_web_component(description, context_data, template_code)
+    field_mapping: Optional[Dict[str, str]] = payload.get("fieldMapping")
+    return ai_service.generate_web_component(description, context_data, template_code, field_mapping)
 
 @router.post("/generate-chart-template")
 def generate_chart_template(payload: Dict[str, Any]):
