@@ -1,0 +1,7 @@
+from .datasource import router as datasource_router
+from .dataset import router as dataset_router
+from .dashboard import router as dashboard_router
+from .web_component import router as web_component_router
+from .chart_template import router as chart_template_router
+from .ai import router as ai_router
+from .saved_component import router as saved_component_router

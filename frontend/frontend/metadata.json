@@ -1,0 +1,5 @@
+{
+  "name": "AI 数据洞察专业版",
+  "description": "一个智能数据报表工作台，具备 Oracle 数据库连接模拟、架构管理，以及基于 Google Gemini 的 AI 驱动数据可视化和洞察功能。",
+  "requestFramePermissions": []
+}
