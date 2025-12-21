@@ -3,6 +3,51 @@ from sqlalchemy.orm import Session
 from backend.schemas.base import ExecuteSqlRequest, PreviewTableRequest, TestConnectionRequest, ConnectionTestResult, DataSourceBase
 from backend.models.orm import DataSource, TableEntry
 import pandas as pd
+import json
+
+def _simplify_text(text: str) -> str:
+    """Helper to extract simple text from potential JSON string"""
+    if not text: return ""
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            for key in ['summary', 'short_description', 'overview', 'description', 'content']:
+                if key in data and isinstance(data[key], str):
+                    return data[key]
+        return text # Fallback
+    except:
+        return text
+
+def _generate_simple_annotation(table_name: str, table_desc: str, columns: list) -> str:
+    """Generates a text summary of table and columns"""
+    lines = []
+    
+    # Table info
+    lines.append(f"表名: {table_name}")
+    simple_desc = _simplify_text(table_desc)
+    if simple_desc:
+        lines.append(f"表说明: {simple_desc}")
+        
+    lines.append("字段列表:")
+    for col in columns:
+        c_name = col.name
+        c_alias = col.alias or ""
+        c_type = col.type
+        c_desc = _simplify_text(col.description)
+        
+        # Format: name (alias) [type] : desc
+        line_parts = [c_name]
+        if c_alias and c_alias != c_name:
+            line_parts.append(f"({c_alias})")
+        
+        line_parts.append(f"[{c_type}]")
+        
+        if c_desc:
+            line_parts.append(f": {c_desc}")
+            
+        lines.append(" ".join(line_parts))
+        
+    return "\n".join(lines)
 
 def _get_connection_url(type, user, password, host, port, database=None, serviceName=None):
     password = password or ""
@@ -234,6 +279,7 @@ def create(db: Session, datasource: DataSourceBase):
         db_table = TableEntry(
             name=table.name,
             description=table.description,
+            simple_description=_generate_simple_annotation(table.name, table.description, table.columns),
             columns=[c.dict() for c in table.columns],
             rows=table.rows
         )
@@ -289,6 +335,7 @@ def update(db: Session, datasource_id: int, datasource: DataSourceBase):
             # Update existing
             db_table.name = table_data.name
             db_table.description = table_data.description
+            db_table.simple_description = _generate_simple_annotation(table_data.name, table_data.description, table_data.columns)
             db_table.columns = [c.dict() for c in table_data.columns]
             db_table.rows = table_data.rows
             processed_ids.add(db_table.id)
@@ -298,6 +345,7 @@ def update(db: Session, datasource_id: int, datasource: DataSourceBase):
             db_table = TableEntry(
                 name=table_data.name,
                 description=table_data.description,
+                simple_description=_generate_simple_annotation(table_data.name, table_data.description, table_data.columns),
                 columns=[c.dict() for c in table_data.columns],
                 rows=table_data.rows,
                 dataSourceId=datasource_id

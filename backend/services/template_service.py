@@ -5,8 +5,11 @@ import time
 
 class TemplateService:
     @staticmethod
-    def get_templates(db: Session, skip: int = 0, limit: int = 100):
-        return db.query(models.Template).offset(skip).limit(limit).all()
+    def get_templates(db: Session, skip: int = 0, limit: int = 100, category: str = None):
+        query = db.query(models.Template)
+        if category:
+            query = query.filter(models.Template.category == category)
+        return query.offset(skip).limit(limit).all()
 
     @staticmethod
     def create_template(db: Session, template: schemas.TemplateCreate):

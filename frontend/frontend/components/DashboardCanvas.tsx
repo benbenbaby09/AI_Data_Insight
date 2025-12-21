@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { 
   Layers, 
   PlusCircle, 
@@ -131,6 +131,40 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
 
     return filterControls;
   }, [activeDashboard, dashboardTables]);
+
+  // --- Draggable Bubble Logic ---
+  const [bubbleY, setBubbleY] = useState(window.innerHeight - 200);
+  const isDraggingRef = useRef(false);
+  const dragStartYRef = useRef(0);
+  const initialBubbleYRef = useRef(0);
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (Math.abs(e.clientY - dragStartYRef.current) > 3) {
+       isDraggingRef.current = true;
+    }
+    const deltaY = e.clientY - dragStartYRef.current;
+    const newY = initialBubbleYRef.current + deltaY;
+    setBubbleY(Math.max(100, Math.min(window.innerHeight - 100, newY)));
+  };
+
+  const handleMouseUp = () => {
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+    
+    if (!isDraggingRef.current) {
+        setIsRightSidebarOpen(true);
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = false;
+    dragStartYRef.current = e.clientY;
+    initialBubbleYRef.current = bubbleY;
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
 
   return (
     <>
@@ -298,8 +332,10 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
          </div>
       </main>
 
-      {/* Right Sidebar - AI Assistant */}
-      <div className={`${isRightSidebarOpen ? 'w-96' : 'w-14'} shrink-0 transition-all duration-300 ease-in-out bg-white border-l border-slate-200 shadow-xl z-10 flex flex-col overflow-hidden`}>
+      {/* Floating AI Assistant Sidebar */}
+      <div 
+        className={`absolute right-0 top-0 bottom-0 h-full w-96 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isRightSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}
+      >
         
         <div className={`flex-1 flex flex-col h-full ${isRightSidebarOpen ? 'block' : 'hidden'}`}>
            <AIAssistant 
@@ -309,25 +345,31 @@ export const DashboardCanvas: React.FC<DashboardCanvasProps> = ({
              webComponents={webComponents}
            />
         </div>
-
-        <div 
-          className={`flex-col items-center py-4 gap-4 cursor-pointer hover:bg-slate-50 h-full ${!isRightSidebarOpen ? 'flex' : 'hidden'}`} 
-          onClick={() => setIsRightSidebarOpen(true)}
-        >
-              <button className="p-2 text-slate-400 hover:text-blue-600">
-                 <PanelRightOpen className="w-5 h-5" />
-              </button>
-              <div className="h-px w-8 bg-slate-200" />
-              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                 <Bot className="w-6 h-6" />
-              </div>
-              <div className="flex-1 w-full flex items-center justify-center">
-                   <span className="writing-vertical-rl text-xs font-bold text-slate-400 tracking-widest uppercase rotate-180" style={{ writingMode: 'vertical-rl' }}>
-                      AI Assistant
-                   </span>
-              </div>
-        </div>
       </div>
+
+      {/* Draggable Bubble (Visible when sidebar is closed) */}
+      {!isRightSidebarOpen && (
+          <div 
+            className="absolute right-6 z-50 cursor-move transition-transform hover:scale-105 active:scale-95 group"
+            style={{ top: bubbleY }}
+            onMouseDown={handleMouseDown}
+          >
+             <div className="relative">
+                <div className="w-12 h-12 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 border-2 border-white ring-2 ring-indigo-100">
+                    <Bot className="w-6 h-6 animate-pulse" />
+                </div>
+                {/* Notification Dot */}
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                </span>
+                {/* Tooltip hint */}
+                <div className="absolute right-full top-1/2 -translate-y-1/2 mr-3 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                   点击展开 AI 助手
+                </div>
+             </div>
+          </div>
+      )}
     </>
   );
 };

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Sparkles, Code, Play, Loader2, AlertCircle, Image as ImageIcon, Monitor, Maximize2, Minimize2, Database, Eye, LayoutTemplate, CreditCard, Table as TableIcon, Type, Box, Wand2, PlusCircle, FileText, Link as LinkIcon, ArrowRight } from 'lucide-react';
-import { WebComponentTemplate, Dataset } from '../types';
+import { WebComponentTemplate, Dataset, TableData, Column } from '../types';
 import { apiService } from '../services/api';
 import { WebComponentRenderer } from './WebComponentRenderer';
 import { TablePreviewModal } from './TablePreviewModal';
@@ -29,6 +29,8 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedDatasetId, setSelectedDatasetId] = useState<number | ''>(''); 
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | string>(-1); 
+  const [fetchedData, setFetchedData] = useState<TableData | undefined>(undefined);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -48,18 +50,55 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
 
   const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
 
+  // Fetch dataset data dynamically
+  useEffect(() => {
+    if (!selectedDatasetId) {
+      setFetchedData(undefined);
+      return;
+    }
+
+    const fetchData = async () => {
+      setIsLoadingData(true);
+      try {
+        const res = await apiService.executeDatasetSql(Number(selectedDatasetId));
+        if (res.success) {
+          const columns: Column[] = res.columns.map(col => ({
+            name: col,
+            type: 'string'
+          }));
+
+          setFetchedData({
+            id: Number(selectedDatasetId),
+            name: 'Preview',
+            columns: columns,
+            rows: res.rows
+          });
+        } else {
+            setFetchedData(undefined);
+        }
+      } catch (err) {
+        console.error("Failed to fetch dataset preview", err);
+        setFetchedData(undefined);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    fetchData();
+  }, [selectedDatasetId]);
+
   // Compute mapped data for preview
   const mappedData = useMemo(() => {
-    if (!selectedDataset?.previewData) return undefined;
+    if (!fetchedData) return undefined;
 
     // If no mapping is active or in Auto mode, return original data
     if (Object.keys(fieldMapping).length === 0 || selectedTemplateId === '__AUTO__') {
-      return selectedDataset.previewData;
+      return fetchedData;
     }
 
     // Apply mapping to rows
     // We create a new array of rows where keys are transformed based on mapping
-    const originalRows = selectedDataset.previewData.rows || [];
+    const originalRows = fetchedData.rows || [];
     const mappedRows = originalRows.map((row: any) => {
       const newRow: any = { ...row }; // Keep original fields for safety
       
@@ -79,25 +118,24 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
     });
 
     return {
-      ...selectedDataset.previewData,
+      ...fetchedData,
       rows: mappedRows
     };
-  }, [selectedDataset, fieldMapping, selectedTemplateId]);
+  }, [fetchedData, fieldMapping, selectedTemplateId]);
 
   // Auto-map fields when template or dataset changes
   useEffect(() => {
-    if (selectedTemplateId === '__AUTO__' || !selectedDatasetId) {
+    if (selectedTemplateId === '__AUTO__' || !selectedDatasetId || !fetchedData) {
       setFieldMapping({});
       return;
     }
 
     const template = BASIC_WEB_COMPONENTS.find(t => t.id === selectedTemplateId);
-    const dataset = datasets.find(d => d.id === selectedDatasetId);
-
+    
     // Only map if template has structured headers and dataset has columns
-    if (template?.structuredExample?.table?.headers && dataset?.previewData?.columns) {
+    if (template?.structuredExample?.table?.headers && fetchedData.columns) {
       const requiredFields = template.structuredExample.table.headers;
-      const availableColumns = dataset.previewData.columns;
+      const availableColumns = fetchedData.columns;
       const newMapping: Record<string, string> = {};
 
       requiredFields.forEach(reqField => {
@@ -122,7 +160,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
     } else {
       setFieldMapping({});
     }
-  }, [selectedTemplateId, selectedDatasetId, datasets]);
+  }, [selectedTemplateId, selectedDatasetId, fetchedData]);
 
   useEffect(() => {
     if (isOpen) {
@@ -213,12 +251,11 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
     try {
       // Send full Data URL (including data:image/...;base64 prefix)
       const imageBase64 = selectedImage;
-      const selectedDataset = datasets.find(d => d.id === selectedDatasetId);
       
       const result = await apiService.aiGenerateWebComponent(
         description,
         imageBase64,
-        selectedDataset?.previewData,
+        fetchedData,
         templateCode,
         fieldMapping
       );
@@ -284,7 +321,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
       <div className={`bg-white shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ease-in-out ${
           isMaximized 
             ? 'w-full h-full rounded-none' 
-            : 'w-full max-w-6xl max-h-[90vh] rounded-xl animate-in fade-in zoom-in-95'
+            : 'w-full max-w-6xl h-[92vh] rounded-xl animate-in fade-in zoom-in-95'
         }`}>
         <div className="bg-slate-900 px-6 py-4 flex justify-between items-center border-b border-slate-700 shrink-0">
           <div className="flex items-center gap-2 text-white">
@@ -358,6 +395,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                          value={selectedDatasetId}
                          onChange={(e) => setSelectedDatasetId(e.target.value ? Number(e.target.value) : '')}
                          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white min-w-0"
+                         disabled={isLoadingData}
                        >
                          <option value="">-- 不绑定，使用生成数据 --</option>
                          {datasets.map(ds => (
@@ -366,9 +404,14 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                            </option>
                          ))}
                        </select>
+                       {isLoadingData && (
+                          <div className="flex items-center justify-center">
+                             <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                          </div>
+                       )}
                        <button
                           onClick={() => setIsPreviewOpen(true)}
-                          disabled={!selectedDatasetId}
+                          disabled={!selectedDatasetId || isLoadingData}
                           className="p-2 border border-slate-300 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors shrink-0"
                           title="查看数据集内容"
                         >
@@ -415,7 +458,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
                                  className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-purple-500 outline-none bg-white min-w-0"
                                >
                                  <option value="">-- 选择字段 --</option>
-                                 {datasets.find(d => d.id === selectedDatasetId)?.previewData?.columns.map(col => (
+                                 {fetchedData?.columns.map(col => (
                                    <option key={col.name} value={col.name}>{col.alias || col.name}</option>
                                  ))}
                                </select>
@@ -600,7 +643,7 @@ export const WebComponentBuilderModal: React.FC<WebComponentBuilderModalProps> =
       <TablePreviewModal
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
-        table={selectedDataset?.previewData || null}
+        table={fetchedData || null}
         sql={selectedDataset?.sql}
       />
     </div>

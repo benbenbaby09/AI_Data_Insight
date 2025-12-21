@@ -16,6 +16,7 @@ class TableEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     description = Column(String, nullable=True)
+    simple_description = Column(String, nullable=True) # New simplified annotation field
     columns = Column(JSON)  # List[Column] as JSON
     rows = Column(JSON)     # Sample rows as JSON
     dataSourceId = Column(Integer, ForeignKey("data_sources.id"), index=True)

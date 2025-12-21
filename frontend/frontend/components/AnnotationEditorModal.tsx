@@ -64,6 +64,7 @@ export const AnnotationEditorModal: React.FC<AnnotationEditorModalProps> = ({
   // Right Side State (Annotation Editor)
   const [annotationSearchTerm, setAnnotationSearchTerm] = useState('');
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
+  const [errorFlashingTableId, setErrorFlashingTableId] = useState<number | null>(null);
 
   // Ref to track stop requests for running tasks (Moved from below to avoid conditional hook call error)
   const stopGenerationRef = React.useRef<Record<number, boolean>>({});
@@ -275,58 +276,17 @@ export const AnnotationEditorModal: React.FC<AnnotationEditorModalProps> = ({
   };
 
   const handleAutoFill = async (table: TableData) => {
-    // Check if prompt is supported (e.g., in Trae Preview environment it might be blocked or restricted)
-    let businessContext: string | null = null;
-    
-    // Try to use a custom prompt approach if native prompt fails or use a fallback
-    // Since prompt() is synchronous and blocking, and some environments block it,
-    // we should ideally use a modal. But for a quick fix, let's try-catch it and fallback
-    // or just assume description if prompt fails.
-    
-    try {
-        // Some environments (like VSCode webviews or custom renderers) might not implement prompt()
-        // or throw an error when it's called.
-        if (typeof window.prompt === 'function') {
-             businessContext = window.prompt(
-               "请输入该表的业务描述（例如：存储用户的基本注册信息）：", 
-               table.description || ""
-             );
-        } else {
-             console.warn("window.prompt is not supported in this environment.");
-             // Fallback: Just use existing description without asking
-             // Ideally we should show a custom modal, but that requires UI state changes.
-             // Let's assume the user is okay with current description if prompt is unavailable.
-             businessContext = table.description || "";
-        }
-    } catch (e) {
-        console.warn("window.prompt failed:", e);
-        businessContext = table.description || "";
-    }
-    
-    // Update table description if user provided one (and it's not null, meaning not cancelled)
-    if (businessContext !== null) {
-      if (businessContext.trim() !== "") {
-        handleTableDescriptionChange(table.id, businessContext);
-      }
-    } else {
-      // User cancelled (only possible if prompt worked and returned null)
-      return;
-    }
+    // Directly use the table description from the input field
+    const businessContext = table.description;
 
     // Check if business description is empty
-    if (!table.description && (!businessContext || businessContext.trim() === "")) {
-      // If prompt was skipped or returned empty string, and table.description is also empty
-      alert("请先填写表业务描述，以便 AI 能更准确地生成标注。");
+    if (!businessContext || businessContext.trim() === "") {
+      setErrorFlashingTableId(table.id);
+      setTimeout(() => setErrorFlashingTableId(null), 2000);
       return;
     }
 
-    const descriptionToUse = (businessContext || table.description || "").trim();
-
-    // Double check just in case logic above missed something (e.g. prompt returned null which means cancel, handled above)
-    if (!descriptionToUse) {
-       alert("表业务描述不能为空。");
-       return;
-    }
+    const descriptionToUse = businessContext.trim();
 
     setGeneratingTables(prev => ({ ...prev, [table.id]: true }));
     setStopGeneration(prev => ({ ...prev, [table.id]: false })); // Reset stop flag
@@ -725,7 +685,11 @@ export const AnnotationEditorModal: React.FC<AnnotationEditorModalProps> = ({
                                    value={table.description || ''}
                                    onChange={(e) => handleTableDescriptionChange(table.id, e.target.value)}
                                    placeholder="例如：存储客户基础信息"
-                                   className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 outline-none text-sm bg-white"
+                                   className={`w-full px-2 py-1 border rounded outline-none text-sm bg-white transition-all duration-300 ${
+                                      errorFlashingTableId === table.id 
+                                        ? 'border-red-500 ring-2 ring-red-200 bg-red-50 animate-pulse' 
+                                        : 'border-slate-300 focus:ring-1 focus:ring-indigo-500'
+                                   }`}
                                  />
                               </div>
                             </div>

@@ -3,7 +3,8 @@ import os
 
 # Define database path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'data', 'ai_insight.db')
+# Point to the actual backend database in the root data directory
+DB_PATH = os.path.abspath(os.path.join(BASE_DIR, '..', 'data', 'ai_insight.db'))
 OUTPUT_FILE = os.path.join(BASE_DIR, 'database_schema.sql')
 
 def export_schema():

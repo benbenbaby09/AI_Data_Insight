@@ -16,12 +16,14 @@ const PAGE_SIZE = 20;
 export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, onClose, table, sql, dbConfig }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [rows, setRows] = useState<any[]>([]);
+  const [fetchedColumns, setFetchedColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Reset page when table changes or modal opens
   useEffect(() => {
     if (isOpen) {
       setCurrentPage(1);
+      setFetchedColumns([]);
     }
   }, [isOpen, table?.id]);
 
@@ -45,11 +47,16 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
         const res = await apiService.previewTableRows(payload);
         if (res.success) {
           setRows(res.rows || []);
+          if (res.columns) {
+            setFetchedColumns(res.columns);
+          }
         } else {
           setRows([]);
+          setFetchedColumns([]);
         }
       } catch {
         setRows([]);
+        setFetchedColumns([]);
       } finally {
         setLoading(false);
       }
@@ -65,6 +72,16 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
     if (table.columns && table.columns.length > 0) {
       return table.columns;
     }
+    
+    // Use fetched columns from API response if available (even if rows are empty)
+    if (fetchedColumns.length > 0) {
+        return fetchedColumns.map(name => ({
+            name: name,
+            type: 'string', // Default to string as we don't have type info from simple select
+            alias: name
+        } as Column));
+    }
+
     // Infer columns from first row of data
     if (effectiveRows.length > 0) {
       const firstRow = effectiveRows[0];
@@ -75,7 +92,7 @@ export const TablePreviewModal: React.FC<TablePreviewModalProps> = ({ isOpen, on
       }));
     }
     return [];
-  }, [table, effectiveRows]);
+  }, [table, effectiveRows, fetchedColumns]);
 
   if (!isOpen || !table) return null;
 

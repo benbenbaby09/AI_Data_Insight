@@ -301,30 +301,34 @@ return InfoCard;`,
     id: -3,
     name: '基础数据表格',
     description: '支持点击表头排序的表格组件，用于展示结构化数据。',
-    code: `const SimpleTable = () => {
-  // 模拟数据
-  const initialRows = [
-    { id: 1, name: "服务器 A", status: "运行中", uptime: "99.9%" },
-    { id: 2, name: "数据库主节点", status: "维护中", uptime: "98.5%" },
-    { id: 3, name: "缓存集群", status: "运行中", uptime: "99.99%" },
-    { id: 4, name: "负载均衡", status: "异常", uptime: "85.2%" },
-    { id: 5, name: "日志服务", status: "运行中", uptime: "99.5%" },
-  ];
+    code: `const SimpleTable = ({ data }) => {
+  // 使用传入的数据或默认空数组
+  // data.rows 应该是数组
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  
+  // 自动提取表头
+  const headers = useMemo(() => {
+    if (rows.length === 0) return [];
+    return Object.keys(rows[0]);
+  }, [rows]);
 
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   // 排序逻辑
   const sortedRows = useMemo(() => {
-    let sortableItems = [...initialRows];
+    let sortableItems = [...rows];
     if (sortConfig.key !== null) {
       sortableItems.sort((a, b) => {
         let aVal = a[sortConfig.key];
         let bVal = b[sortConfig.key];
         
-        // 简单的百分比数字处理
-        if (typeof aVal === 'string' && aVal.includes('%')) {
-           aVal = parseFloat(aVal);
-           bVal = parseFloat(bVal);
+        // 尝试数字比较
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+             aVal = aNum;
+             bVal = bNum;
         }
 
         if (aVal < bVal) {
@@ -337,7 +341,7 @@ return InfoCard;`,
       });
     }
     return sortableItems;
-  }, [sortConfig]);
+  }, [rows, sortConfig]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -354,64 +358,46 @@ return InfoCard;`,
         : <Lucide.ArrowDown className="w-3 h-3 text-blue-500 ml-1" />;
   };
 
+  if (rows.length === 0) {
+      return (
+        <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-lg bg-slate-50">
+           暂无数据
+        </div>
+      );
+  }
+
   return (
     <div className="w-full h-full overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-white flex flex-col">
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 font-semibold text-slate-700 text-sm flex justify-between items-center">
-        <span>系统状态监控</span>
-        <span className="text-[10px] text-slate-400 font-normal">点击表头排序</span>
+        <span>数据预览</span>
+        <span className="text-[10px] text-slate-400 font-normal">点击表头排序 ({rows.length} 条)</span>
       </div>
       <div className="overflow-auto flex-1">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10">
+        <table className="w-full text-left text-sm whitespace-nowrap">
+          <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 shadow-sm">
             <tr>
-              <th 
-                className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none group"
-                onClick={() => requestSort('name')}
-              >
-                <div className="flex items-center">
-                  服务名称
-                  {getSortIcon('name')}
-                </div>
-              </th>
-              <th 
-                className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none group"
-                onClick={() => requestSort('status')}
-              >
-                <div className="flex items-center">
-                  状态
-                  {getSortIcon('status')}
-                </div>
-              </th>
-              <th 
-                className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 transition-colors select-none group"
-                onClick={() => requestSort('uptime')}
-              >
-                <div className="flex items-center justify-end">
-                  可用性
-                  {getSortIcon('uptime')}
-                </div>
-              </th>
+              {headers.map(header => (
+                  <th 
+                    key={header}
+                    className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors select-none group border-b border-slate-200"
+                    onClick={() => requestSort(header)}
+                  >
+                    <div className="flex items-center gap-1">
+                      {header}
+                      {getSortIcon(header)}
+                    </div>
+                  </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {sortedRows.map((row) => (
-              <tr key={row.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-slate-700">{row.name}</td>
-                <td className="px-4 py-3">
-                  <span className={\`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium \${
-                    row.status === '运行中' ? 'bg-emerald-100 text-emerald-700' :
-                    row.status === '异常' ? 'bg-red-100 text-red-700' :
-                    'bg-amber-100 text-amber-700'
-                  }\`}>
-                    <span className={\`w-1.5 h-1.5 rounded-full \${
-                      row.status === '运行中' ? 'bg-emerald-500' :
-                      row.status === '异常' ? 'bg-red-500' :
-                      'bg-amber-500'
-                    }\`}></span>
-                    {row.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-slate-600">{row.uptime}</td>
+            {sortedRows.map((row, idx) => (
+              <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                {headers.map(header => (
+                    <td key={header} className="px-4 py-3 text-slate-700">
+                        {row[header]}
+                    </td>
+                ))}
               </tr>
             ))}
           </tbody>

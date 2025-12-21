@@ -53,6 +53,12 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [generationSteps, setGenerationSteps] = useState<GenerationStep[]>([]);
   const [copied, setCopied] = useState(false);
+  const [isTableSelectionLocked, setIsTableSelectionLocked] = useState(false);
+  const stopGenerationRef = React.useRef(false);
+
+  const handleStopGeneration = () => {
+    stopGenerationRef.current = true;
+  };
 
   const handleCopy = async () => {
     try {
@@ -68,6 +74,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setErrorMsg(null);
+      setIsTableSelectionLocked(false); // Reset lock state on open
       if (initialDataset) {
         setDatasetName(initialDataset.name);
         setDatasetDesc(initialDataset.description || '');
@@ -116,6 +123,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   };
 
   const handleTableToggle = (tableId: number) => {
+    if (isTableSelectionLocked) return;
     setSelectedTableIds(prev => 
       prev.includes(tableId) ? prev.filter(id => id !== tableId) : [...prev, tableId]
     );
@@ -171,7 +179,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   if (!isOpen) return null;
 
   const handleSelectAllFiltered = () => {
-    if (!activeDS) return;
+    if (!activeDS || isTableSelectionLocked) return;
     
     const allFilteredIds = filteredTables.map(t => t.id);
     const allSelected = allFilteredIds.every(id => selectedTableIds.includes(id));
@@ -234,10 +242,25 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
   };
 
   const handleGenerateSQL = async () => {
-    if (selectedTableIds.length === 0) return;
+    // Valid check: if selection is locked, user MUST select tables.
+    // However, user requested to "skip intelligent selection and use selected tables".
+    // If we have selected tables, we use them (which is default behavior).
+    // If we have NO selected tables, we use empty list (and tell backend not to auto-select).
+    // So we remove the blocking check here.
+    /*
+    if (isTableSelectionLocked && selectedTableIds.length === 0) {
+        setErrorMsg("请先选择数据表");
+        return;
+    }
+    */
     
     setIsGenerating(true);
+    stopGenerationRef.current = false;
+    // Reset all previous states
     setGenerationSteps([{ id: 'init', label: '正在准备上下文...', status: 'success' }]);
+    setGeneratedSql('');
+    setSqlExplanation('');
+    setErrorMsg(null);
     
     // Filter data sources to only include selected tables for context
     // Since we now have single source
@@ -246,15 +269,39 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
         setIsGenerating(false);
         return;
     }
-
-    const relevantDataSources = [{
-        ...activeDS,
-        tables: activeDS.tables.filter(t => selectedTableIds.includes(t.id))
-    }];
     
+    // Check if we need auto-selection
+    let effectiveSelectedTableIds = [...selectedTableIds];
+    
+    // Run auto-select if NOT locked (regardless of whether tables are already selected)
+    if (!isTableSelectionLocked) {
+        setGenerationSteps(prev => [...prev, { id: 'auto-select', label: 'AI 智能选表', status: 'running' }]);
+        try {
+            const selectResult = await apiService.aiSelectTables(activeDataSourceId, userQuery);
+            if (stopGenerationRef.current) return;
+            
+            if (selectResult.selectedTableIds && selectResult.selectedTableIds.length > 0) {
+                effectiveSelectedTableIds = selectResult.selectedTableIds;
+                setSelectedTableIds(effectiveSelectedTableIds);
+                setGenerationSteps(prev => prev.map(s => s.id === 'auto-select' ? { ...s, status: 'success' } : s));
+            } else {
+                 setGenerationSteps(prev => prev.map(s => s.id === 'auto-select' ? { ...s, status: 'error', message: '未找到相关表' } : s));
+                 setErrorMsg("AI 未能找到相关表，请尝试手动选择或修改问题。");
+                 setIsGenerating(false);
+                 return;
+            }
+        } catch (e) {
+            console.error("Auto-selection failed", e);
+            setGenerationSteps(prev => prev.map(s => s.id === 'auto-select' ? { ...s, status: 'error', message: '选表失败' } : s));
+            setErrorMsg("自动选表失败，请手动选择表。");
+            setIsGenerating(false);
+            return;
+        }
+    }
+
     const queryToSend = userQuery.trim() || "查询选中表的所有数据";
     
-    setErrorMsg(null);
+    // setErrorMsg(null); // Moved to top
     
     let attempts = 0;
     const maxAttempts = 5; // Increased to 5 as per requirement
@@ -266,6 +313,8 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
     setGenerationSteps(prev => [...prev, { id: 'gen-1', label: 'AI 生成 SQL (第 1 次尝试)', status: 'running' }]);
 
     while (attempts < maxAttempts && !success) {
+        if (stopGenerationRef.current) break;
+
         attempts++;
         const currentStepId = attempts === 1 ? 'gen-1' : `gen-${attempts}`;
         
@@ -281,9 +330,15 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
             // If this is a retry due to execution error, append the error to the query
             const prompt = attempts === 1 ? currentQuery : `${currentQuery}\n\nPrevious generated SQL failed with error: ${lastError}. Please fix the SQL.`;
 
-            const result = await apiService.aiGenerateDatasetSQL(relevantDataSources, prompt);
+            if (stopGenerationRef.current) break;
+            // Changed: Send only IDs instead of full schema
+            // Also pass skipAutoSelect flag if locked
+            const result = await apiService.aiGenerateDatasetSQL(activeDataSourceId, effectiveSelectedTableIds, prompt, isTableSelectionLocked);
+            if (stopGenerationRef.current) break;
             console.log("Generation result:", result);
             
+            // Note: Auto-select logic is now handled before the loop, so result.relevantTableIds usage is redundant but harmless.
+
             // Mark generation as success
             setGenerationSteps(prev => prev.map(s => s.id === currentStepId ? { ...s, status: 'success' } : s));
 
@@ -319,6 +374,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                 const testStepId = `test-${attempts}`;
                 setGenerationSteps(prev => [...prev, { id: testStepId, label: '自动执行测试 SQL', status: 'running' }]);
 
+                if (stopGenerationRef.current) break;
                 console.log("Auto-testing generated SQL:", generatedSqlCandidate);
                 try {
                     const payload = {
@@ -333,6 +389,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                         limit: 1 // We only need to check if it runs
                     };
                     const execResult = await apiService.executeSql(payload);
+                    if (stopGenerationRef.current) break;
                     
                     if (execResult.success) {
                         // Success!
@@ -368,6 +425,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
             }
             
             if (!success && attempts < maxAttempts) {
+                if (stopGenerationRef.current) break;
                 // Prepare for next attempt
                 setGenerationSteps(prev => [...prev, { id: `gen-${attempts + 1}`, label: `AI 修正 SQL (第 ${attempts + 1} 次尝试)`, status: 'running' }]);
                 // Wait 1s before retry
@@ -382,12 +440,19 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
             setGenerationSteps(prev => prev.map(s => s.id === currentStepId ? { ...s, status: 'error', message: lastError } : s));
             
             if (attempts < maxAttempts) {
+                if (stopGenerationRef.current) break;
                 setGenerationSteps(prev => [...prev, { id: `gen-${attempts + 1}`, label: `AI 修正 SQL (第 ${attempts + 1} 次尝试)`, status: 'running' }]);
                 await new Promise(resolve => setTimeout(resolve, 1000));
             } else {
                 setErrorMsg("生成 SQL 失败: " + lastError);
             }
         }
+    }
+
+    if (stopGenerationRef.current) {
+        setErrorMsg("已停止生成");
+        // Optional: Mark running steps as error or cancelled
+        setGenerationSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error', message: '用户已停止' } : s));
     }
     
     setIsGenerating(false);
@@ -442,6 +507,12 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                 description: 'Generated from SQL execution',
                 dataSourceId: activeDataSourceId as number
             });
+            
+            // Auto-fill description with SQL explanation if available
+            if (sqlExplanation) {
+                setDatasetDesc(sqlExplanation);
+            }
+            
             setCurrentPage(1);
             setStep('preview-save');
         } else {
@@ -520,200 +591,309 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
           {/* STEP 1: Select Tables & Generate Query */}
           {(step === 'select-source' || step === 'generate-query') && (
             <div className="h-full flex flex-col gap-6">
-              <div className="flex items-start gap-6 flex-1 min-h-0">
-                {/* Left Column: Data Source & Table Selection */}
-                <div className="w-1/2 flex flex-col gap-4 h-full">
-                   <div>
-                       <h3 className="text-lg font-semibold text-slate-800">1. 选择数据表</h3>
-                       <p className="text-sm text-slate-500">选择参与分析的数据表</p>
+              <div className="flex items-start gap-4 flex-1 min-h-0">
+                
+                {/* Column 1: Config & Query Generation */}
+                <div className="w-1/4 flex flex-col gap-4 h-full">
+                   <div className="shrink-0">
+                       <h3 className="text-lg font-semibold text-slate-800">1. 配置与生成</h3>
+                       <p className="text-sm text-slate-500">选择数据源并描述任务</p>
                    </div>
                    
-                   {dataSources.length === 0 ? (
-                        <div className="text-center py-10 text-slate-400 border border-dashed rounded-lg">
-                          <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                          <p>暂无可用数据源</p>
-                        </div>
-                   ) : (
-                        <div className="flex flex-col gap-4 flex-1 min-h-0">
-                           {/* Data Source Selection */}
-                           <div className="flex items-center gap-3">
-                                <label className="text-sm font-medium text-slate-700 shrink-0">数据源：</label>
-                                <div className="flex-1">
-                                    {preSelectedDataSourceId ? (
-                                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded text-slate-700 text-sm">
-                                            <Database className="w-4 h-4 text-blue-600" />
-                                            <span className="font-medium truncate">{activeDS?.name || '未知数据源'}</span>
+                   <div className="flex flex-col gap-3 flex-1 min-h-0">
+                       {/* Data Source Selection (Moved to Column 1) */}
+                       <div className="flex flex-col gap-1 shrink-0">
+                            <label className="text-xs font-medium text-slate-700">数据源</label>
+                            <div className="w-full">
+                                {preSelectedDataSourceId ? (
+                                    <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded text-slate-700 text-sm">
+                                        <Database className="w-4 h-4 text-blue-600" />
+                                        <span className="font-medium truncate">{activeDS?.name || '未知数据源'}</span>
+                                    </div>
+                                ) : (
+                                    <div className="relative">
+                                        <select 
+                                            value={activeDataSourceId} 
+                                            onChange={(e) => handleDataSourceChange(e.target.value)}
+                                            className="w-full pl-9 pr-8 py-2 text-sm bg-white border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 appearance-none text-slate-700 cursor-pointer shadow-sm"
+                                        >
+                                            <option value="" disabled>请选择数据源...</option>
+                                            {dataSources.map(ds => (
+                                                <option key={ds.id} value={ds.id}>{ds.name}</option>
+                                            ))}
+                                        </select>
+                                        <Database className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                         </div>
-                                    ) : (
-                                        <div className="relative">
-                                            <select 
-                                                value={activeDataSourceId} 
-                                                onChange={(e) => handleDataSourceChange(e.target.value)}
-                                                className="w-full pl-9 pr-8 py-1.5 text-sm bg-white border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 appearance-none text-slate-700 cursor-pointer shadow-sm"
-                                            >
-                                                <option value="" disabled>请选择数据源...</option>
-                                                {dataSources.map(ds => (
-                                                    <option key={ds.id} value={ds.id}>{ds.name}</option>
-                                                ))}
-                                            </select>
-                                            <Database className="w-4 h-4 text-slate-400 absolute left-2.5 top-2" />
-                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                           </div>
+                                    </div>
+                                )}
+                            </div>
+                       </div>
 
-                           {/* Table List */}
-                           {activeDataSourceId && (
+                       <div className="flex flex-col gap-2 shrink-0">
+                          <textarea 
+                            value={userQuery}
+                            onChange={(e) => setUserQuery(e.target.value)}
+                            placeholder="例如：查询所有 2024 年第一季度的销售订单..."
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm resize-none h-24"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    if (!isGenerating) handleGenerateSQL();
+                                }
+                            }}
+                          />
+                          {isGenerating ? (
+                            <button 
+                              onClick={handleStopGeneration}
+                              className="w-full bg-red-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-600 flex items-center justify-center gap-2 text-sm transition-colors"
+                              title="点击停止生成"
+                            >
+                                <XCircle className="w-4 h-4" />
+                                停止生成
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={handleGenerateSQL}
+                              disabled={!activeDataSourceId || (isTableSelectionLocked && selectedTableIds.length === 0)}
+                              className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm transition-colors"
+                              title={!activeDataSourceId ? "请先选择数据源" : "点击生成 SQL"}
+                            >
+                                <Wand2 className="w-4 h-4" />
+                                生成 SQL
+                            </button>
+                          )}
+                       </div>
+                       
+                       {/* Status / Steps Area */}
+                       <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 shadow-inner overflow-y-auto p-3">
+                           {generationSteps.length > 0 ? (
+                               <div className="flex flex-col gap-2.5">
+                                   {generationSteps.map((step, idx) => (
+                                       <div key={step.id} className="flex items-start gap-2 text-xs animate-in fade-in slide-in-from-left-2 duration-300">
+                                           <div className="mt-0.5 shrink-0 relative">
+                                               {step.status === 'running' && <Loader2 className="w-3 h-3 animate-spin text-indigo-600" />}
+                                               {step.status === 'success' && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+                                               {step.status === 'error' && <XCircle className="w-3 h-3 text-red-500" />}
+                                               {step.status === 'pending' && <Circle className="w-3 h-3 text-slate-300" />}
+                                           </div>
+                                           <div className="flex flex-col min-w-0 flex-1">
+                                               <span className={`font-medium ${
+                                                   step.status === 'error' ? 'text-red-600' : 
+                                                   step.status === 'success' ? 'text-slate-700' : 
+                                                   step.status === 'running' ? 'text-indigo-600' :
+                                                   'text-slate-500'
+                                               }`}>
+                                                   {step.label}
+                                               </span>
+                                               {step.message && (
+                                                   <span className="text-[10px] text-red-500 mt-1 bg-red-50 p-1 rounded border border-red-100 block break-words font-mono">
+                                                       {step.message}
+                                                   </span>
+                                               )}
+                                           </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           ) : (
+                               <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs text-center p-4">
+                                   <Layers className="w-8 h-8 mb-2 opacity-20" />
+                                   <p>任务状态将在此显示</p>
+                               </div>
+                           )}
+                           
+                           {errorMsg && (
+                               <div className={`text-xs flex items-center gap-2 ${generationSteps.length > 0 ? 'pt-2 border-t border-slate-200 mt-2' : ''} text-red-600`}>
+                                   <AlertCircle className="w-3 h-3 shrink-0" />
+                                   {errorMsg}
+                               </div>
+                           )}
+                       </div>
+                   </div>
+                </div>
+
+                {/* Column 2: Table Selection (Split into Available and Selected) */}
+                <div className="flex-1 flex gap-4 h-full border-l border-slate-200 pl-4">
+                   
+                   {/* Left Sub-column: Available Tables */}
+                   <div className={`flex-1 flex flex-col gap-4 h-full min-w-0 transition-opacity duration-200 ${isTableSelectionLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                       <div className="shrink-0">
+                           <h3 className="text-lg font-semibold text-slate-800">2. 选择数据表</h3>
+                           <p className="text-sm text-slate-500">选择参与分析的数据表</p>
+                       </div>
+                       
+                       {dataSources.length === 0 ? (
+                            <div className="text-center py-10 text-slate-400 border border-dashed rounded-lg">
+                              <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                              <p>暂无可用数据源</p>
+                            </div>
+                       ) : !activeDataSourceId ? (
+                            <div className="text-center py-10 text-slate-400 border border-dashed rounded-lg">
+                              <Database className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                              <p>请先在左侧选择数据源</p>
+                            </div>
+                       ) : (
+                            <div className="flex flex-col gap-3 flex-1 min-h-0">
+                               {/* Table List */}
                                 <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm flex flex-col flex-1 min-h-0">
-                                    <div className="p-3 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50 shrink-0">
+                                    <div className="p-2 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50/50 shrink-0">
                                         <div className="relative flex-1">
-                                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                            <Search className="w-3 h-3 text-slate-400 absolute left-2.5 top-2.5" />
                                             <input 
                                                 type="text"
                                                 value={searchTerm}
                                                 onChange={(e) => setSearchTerm(e.target.value)}
                                                 placeholder="搜索表..."
-                                                className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-md focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                                className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                                disabled={isTableSelectionLocked}
                                             />
                                         </div>
                                         <button 
                                             onClick={handleSelectAllFiltered}
-                                            className="text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap"
+                                            disabled={isTableSelectionLocked}
+                                            className="text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap px-1 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            {filteredTables.length > 0 && filteredTables.every(t => selectedTableIds.includes(t.id)) ? '取消全选' : '全选'}
+                                            {filteredTables.length > 0 && filteredTables.every(t => selectedTableIds.includes(t.id)) ? '全不选' : '全选'}
                                         </button>
                                     </div>
-                                    <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 bg-slate-50/30 content-start">
+                                    <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5 bg-slate-50/30">
                                         {filteredTables.length === 0 ? (
-                                            <div className="col-span-2 text-center py-8 text-slate-400 text-sm">无匹配表</div>
+                                            <div className="text-center py-8 text-slate-400 text-xs">无匹配表</div>
                                         ) : (
                                             filteredTables.map(table => {
                                                 const isSelected = selectedTableIds.includes(table.id);
                                                 return (
                                                     <div 
                                                         key={table.id}
-                                                        className={`group flex items-center gap-2 p-2 rounded-lg border transition-all cursor-pointer ${
+                                                        className={`group flex items-center gap-2 p-2 rounded-md border transition-all cursor-pointer ${
                                                             isSelected ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-white border-slate-200 hover:border-blue-300'
-                                                        }`}
+                                                        } ${isTableSelectionLocked ? 'cursor-not-allowed' : ''}`}
                                                         onClick={() => handleTableToggle(table.id)}
                                                     >
-                                                        <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                                                        <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
                                                             isSelected ? 'bg-blue-600 border-blue-600' : 'bg-white border-slate-300'
                                                         }`}>
-                                                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                                                            {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
                                                         </div>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className={`text-sm font-medium truncate ${isSelected ? 'text-blue-900' : 'text-slate-700'}`}>
+                                                            <div className={`text-xs font-medium truncate ${isSelected ? 'text-blue-900' : 'text-slate-700'}`}>
                                                                 {table.name}
                                                             </div>
                                                             {table.description && (
-                                                                <div className={`text-xs truncate ${isSelected ? 'text-blue-700/70' : 'text-slate-500'}`}>
+                                                                <div className={`text-[10px] truncate ${isSelected ? 'text-blue-700/70' : 'text-slate-500'}`}>
                                                                     {table.description}
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setAnnotationTable(table);
-                                                            }}
-                                                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-100 rounded opacity-0 group-hover:opacity-100 mr-1"
-                                                            title="查看标注信息"
-                                                        >
-                                                            <FileText className="w-3 h-3" />
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setPreviewTable(table);
-                                                            }}
-                                                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded opacity-0 group-hover:opacity-100"
-                                                        >
-                                                            <Eye className="w-3 h-3" />
-                                                        </button>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setAnnotationTable(table);
+                                                                }}
+                                                                className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-100 rounded"
+                                                                title="标注"
+                                                            >
+                                                                <FileText className="w-3 h-3" />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setPreviewTable(table);
+                                                                }}
+                                                                className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded"
+                                                                title="预览"
+                                                            >
+                                                                <Eye className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 );
                                             })
                                         )}
                                     </div>
                                 </div>
-                           )}
-                        </div>
-                   )}
+                            </div>
+                       )}
+                   </div>
+
+                   {/* Right Sub-column: Selected Tables */}
+                   <div className="w-1/3 flex flex-col gap-4 h-full min-w-0">
+                       <div className="shrink-0 flex items-start justify-between gap-2">
+                           <div>
+                               <h3 className="text-sm font-semibold text-slate-800">已选表 ({selectedTableIds.length})</h3>
+                               <p className="text-xs text-slate-500">已选择的数据表清单</p>
+                           </div>
+                           <label className={`flex items-center gap-1.5 mt-1 select-none ${selectedTableIds.length === 0 ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                               <div className="relative flex items-center">
+                                   <input 
+                                       type="checkbox" 
+                                       checked={isTableSelectionLocked}
+                                       onChange={(e) => setIsTableSelectionLocked(e.target.checked)}
+                                       className="sr-only peer"
+                                       disabled={selectedTableIds.length === 0}
+                                   />
+                                   <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-blue-600"></div>
+                               </div>
+                               <span className={`text-xs font-medium ${isTableSelectionLocked ? 'text-blue-600' : 'text-slate-500'}`}>
+                                   {isTableSelectionLocked ? '已锁定' : '锁定'}
+                               </span>
+                           </label>
+                       </div>
+                       
+                       <div className="flex flex-col gap-3 flex-1 min-h-0">
+                           <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50 shadow-inner flex flex-col flex-1 min-h-0">
+                                <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
+                                    {selectedTableIds.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-400 text-xs">
+                                            <p>未选择任何表</p>
+                                        </div>
+                                    ) : (
+                                        selectedTableIds.map(id => {
+                                            const table = activeDS?.tables.find(t => t.id === id);
+                                            if (!table) return null;
+                                            return (
+                                                <div 
+                                                    key={id}
+                                                    className={`flex items-center justify-between gap-2 p-2 rounded-md bg-white border border-slate-200 shadow-sm group ${isTableSelectionLocked ? 'opacity-80' : ''}`}
+                                                >
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-xs font-medium truncate text-slate-700">
+                                                            {table.name}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleTableToggle(id)}
+                                                        disabled={isTableSelectionLocked}
+                                                        className={`p-1 text-slate-400 rounded transition-colors ${
+                                                            isTableSelectionLocked 
+                                                                ? 'cursor-not-allowed opacity-50' 
+                                                                : 'hover:text-red-500 hover:bg-red-50'
+                                                        }`}
+                                                        title={isTableSelectionLocked ? "已锁定" : "移除"}
+                                                    >
+                                                        {isTableSelectionLocked ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <X className="w-3 h-3" />}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                           </div>
+                       </div>
+                   </div>
+
                 </div>
 
-                {/* Right Column: Query Generation */}
-                <div className="w-1/2 flex flex-col gap-4 h-full border-l border-slate-200 pl-6">
-                   <div>
-                       <h3 className="text-lg font-semibold text-slate-800">2. 生成查询</h3>
-                       <p className="text-sm text-slate-500">描述你想查询的数据</p>
+                {/* Column 3: SQL Editor */}
+                <div className="w-1/3 flex flex-col gap-4 h-full border-l border-slate-200 pl-4">
+                   <div className="shrink-0">
+                       <h3 className="text-lg font-semibold text-slate-800">3. SQL 结果</h3>
+                       <p className="text-sm text-slate-500">AI 生成的 SQL 语句</p>
                    </div>
                    
                    <div className="flex flex-col gap-3 flex-1 min-h-0">
-                       <div className="flex gap-2">
-                          <input 
-                            type="text" 
-                            value={userQuery}
-                            onChange={(e) => setUserQuery(e.target.value)}
-                            placeholder="例如：查询所有 2024 年第一季度的销售订单..."
-                            className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                            onKeyDown={(e) => e.key === 'Enter' && handleGenerateSQL()}
-                          />
-                          <button 
-                            onClick={handleGenerateSQL}
-                            disabled={isGenerating || selectedTableIds.length === 0}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap text-sm"
-                            title={selectedTableIds.length === 0 ? "请先选择至少一个数据表" : "点击生成 SQL"}
-                          >
-                             {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                             生成 SQL
-                          </button>
-                       </div>
-                       
-                       {(generationSteps.length > 0 || errorMsg) && (
-                           <div className="flex flex-col gap-3 mb-2 p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-sm max-h-[300px] overflow-y-auto">
-                               {generationSteps.length > 0 && (
-                                   <div className="flex flex-col gap-2.5">
-                                       {generationSteps.map((step, idx) => (
-                                           <div key={step.id} className="flex items-start gap-3 text-sm animate-in fade-in slide-in-from-left-2 duration-300">
-                                               <div className="mt-0.5 shrink-0 relative">
-                                                   {step.status === 'running' && <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />}
-                                                   {step.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                                                   {step.status === 'error' && <XCircle className="w-4 h-4 text-red-500" />}
-                                                   {step.status === 'pending' && <Circle className="w-4 h-4 text-slate-300" />}
-                                               </div>
-                                               <div className="flex flex-col min-w-0 flex-1">
-                                                   <span className={`font-medium ${
-                                                       step.status === 'error' ? 'text-red-600' : 
-                                                       step.status === 'success' ? 'text-slate-700' : 
-                                                       step.status === 'running' ? 'text-indigo-600' :
-                                                       'text-slate-500'
-                                                   }`}>
-                                                       {step.label}
-                                                   </span>
-                                                   {step.message && (
-                                                       <span className="text-xs text-red-500 mt-1 bg-red-50 p-2 rounded border border-red-100 block break-words font-mono">
-                                                           {step.message}
-                                                       </span>
-                                                   )}
-                                               </div>
-                                           </div>
-                                       ))}
-                                   </div>
-                               )}
-                               
-                               {errorMsg && (
-                                   <div className={`text-sm flex items-center gap-2 ${generationSteps.length > 0 ? 'pt-2 border-t border-slate-200 mt-1' : ''} text-red-600`}>
-                                       <AlertCircle className="w-4 h-4 shrink-0" />
-                                       {errorMsg}
-                                   </div>
-                               )}
-                           </div>
-                       )}
-
                        <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden flex flex-col bg-slate-900 shadow-sm min-h-0">
                              <div className="bg-slate-800 px-3 py-2 border-b border-slate-700 flex justify-between items-center shrink-0">
                                 <div className="flex items-center gap-2">
@@ -737,7 +917,7 @@ export const DatasetBuilderModal: React.FC<DatasetBuilderModalProps> = ({
                                 onChange={(e) => setGeneratedSql(e.target.value)}
                                 className="flex-1 p-3 font-mono text-xs text-blue-100 bg-transparent border-none outline-none resize-none focus:ring-0"
                                 spellCheck={false}
-                                placeholder="在此输入 SQL 语句..."
+                                placeholder="生成的 SQL 将显示在这里..."
                              />
                              {sqlExplanation && (
                                <div className="bg-slate-800/50 px-3 py-2 border-t border-slate-700 text-xs text-slate-400 shrink-0">

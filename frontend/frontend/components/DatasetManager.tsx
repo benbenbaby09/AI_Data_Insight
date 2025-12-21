@@ -9,6 +9,7 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Database,
   Edit3,
   ExternalLink
@@ -41,6 +42,7 @@ export const DatasetManager: React.FC<DatasetManagerProps> = ({
   checkUsage
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterSourceId, setFilterSourceId] = useState<number | 'all'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [viewingDataset, setViewingDataset] = useState<Dataset | null>(null);
   
@@ -91,6 +93,13 @@ export const DatasetManager: React.FC<DatasetManagerProps> = ({
   // Filter & Search
   const filteredDatasets = useMemo(() => {
     let result = datasets;
+    
+    // Filter by Source
+    if (filterSourceId !== 'all') {
+      result = result.filter(d => d.dataSourceId === filterSourceId);
+    }
+
+    // Filter by Search Term
     if (searchTerm) {
       const lower = searchTerm.toLowerCase();
       result = result.filter(d => 
@@ -100,7 +109,7 @@ export const DatasetManager: React.FC<DatasetManagerProps> = ({
     }
     // Sort by created desc
     return [...result].sort((a, b) => b.createdAt - a.createdAt);
-  }, [datasets, searchTerm]);
+  }, [datasets, searchTerm, filterSourceId]);
 
   // Pagination
   const totalPages = Math.ceil(filteredDatasets.length / PAGE_SIZE);
@@ -145,7 +154,30 @@ export const DatasetManager: React.FC<DatasetManagerProps> = ({
 
       {/* Toolbar & Search */}
       <div className="px-8 py-4 bg-slate-50 flex justify-center shrink-0">
-         <div className="max-w-7xl w-full flex justify-between items-center">
+         <div className="max-w-7xl w-full flex justify-between items-center gap-4">
+            {/* Source Filter */}
+            <div className="relative w-64">
+               <Database className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+               <select
+                 value={filterSourceId}
+                 onChange={(e) => {
+                    const val = e.target.value;
+                    setFilterSourceId(val === 'all' ? 'all' : Number(val));
+                    setCurrentPage(1);
+                 }}
+                 className="w-full pl-10 pr-8 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-sm appearance-none bg-white text-sm cursor-pointer"
+               >
+                 <option value="all">所有数据源</option>
+                 {dataSources.map(ds => (
+                    <option key={ds.id} value={ds.id}>{ds.name}</option>
+                 ))}
+               </select>
+               <div className="absolute right-3 top-3 pointer-events-none">
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+               </div>
+            </div>
+
+            {/* Search Input */}
             <div className="relative w-96">
                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                <input 

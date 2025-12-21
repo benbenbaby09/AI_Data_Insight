@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 from backend.services import ai_service
 from backend.utils.logging import LoggingAPIRoute
+from backend.db.session import get_db
 
 router = APIRouter(
     prefix="/api/ai",
@@ -10,10 +12,18 @@ router = APIRouter(
 )
 
 @router.post("/generate-dataset-sql")
-def generate_dataset_sql(payload: Dict[str, Any]):
-    data_sources: List[Dict[str, Any]] = payload.get("dataSources", [])
+def generate_dataset_sql(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    data_source_id: int = payload.get("dataSourceId")
+    table_ids: List[int] = payload.get("tableIds", [])
     user_query: str = payload.get("userQuery", "")
-    return ai_service.generate_dataset_sql(data_sources, user_query)
+    skip_auto_select: bool = payload.get("skipAutoSelect", False)
+    return ai_service.generate_dataset_sql(db, data_source_id, table_ids, user_query, skip_auto_select)
+
+@router.post("/select-tables")
+def select_tables(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    data_source_id: int = payload.get("dataSourceId")
+    user_query: str = payload.get("userQuery", "")
+    return ai_service.auto_select_tables(db, data_source_id, user_query)
 
 @router.post("/generate-table-annotations")
 def generate_table_annotations(payload: Dict[str, Any]):

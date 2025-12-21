@@ -13,6 +13,7 @@ class TableData(BaseModel):
     columns: List[Column]
     rows: Optional[List[Dict[str, Any]]] = []
     description: Optional[str] = None
+    simple_description: Optional[str] = None
     dataSourceId: Optional[int] = None
 
 class DatabaseConfig(BaseModel):

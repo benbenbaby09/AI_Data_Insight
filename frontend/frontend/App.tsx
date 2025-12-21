@@ -111,7 +111,7 @@ export default function App() {
   
   // Active Context State
   const [activeDashboardId, setActiveDashboardId] = useState<number | null>(null);
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
 
   // Editor Global Filter State
@@ -172,23 +172,41 @@ export default function App() {
     }
   }, []);
 
+  // Template Data Loading (Lazy)
+  const loadTemplateData = async () => {
+    try {
+      const [comps, temps] = await Promise.all([
+        apiService.getWebComponents(),
+        apiService.getChartTemplates()
+      ]);
+      setWebComponents(comps);
+      setChartTemplates(temps);
+    } catch (e) {
+      console.error("Failed to load template data", e);
+    }
+  };
+
+  useEffect(() => {
+    if (isAddComponentModalOpen) {
+       if (chartTemplates.length === 0 && webComponents.length === 0) {
+           loadTemplateData();
+       }
+    }
+  }, [isAddComponentModalOpen]);
+
   useEffect(() => {
     // Load from API
     const loadData = async () => {
       try {
-        const [ds, dsets, dbs, comps, temps, savedComps] = await Promise.all([
+        const [ds, dsets, dbs, savedComps] = await Promise.all([
           apiService.getDataSources(),
           apiService.getDatasets(),
           apiService.getDashboards(),
-          apiService.getWebComponents(),
-          apiService.getChartTemplates(),
           apiService.getSavedComponents()
         ]);
 
         setDataSources(ds);
         setDatasets(dsets);
-        setWebComponents(comps);
-        setChartTemplates(temps);
         setSavedComponents(savedComps);
 
         if (dbs.length > 0) {
@@ -1221,6 +1239,7 @@ export default function App() {
             onDeleteChart={handleDeleteChartTemplate}
             onSaveWebComponent={handleSaveWebComponent}
             onDeleteWebComponent={handleDeleteWebComponent}
+            onRefreshData={loadTemplateData}
           />
         } />
 

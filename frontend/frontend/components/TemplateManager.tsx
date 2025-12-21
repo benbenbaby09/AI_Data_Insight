@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
   LayoutTemplate, 
@@ -15,7 +15,11 @@ import {
   Code,
   Edit3,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Map,
+  Filter,
+  Gauge,
+  BoxSelect
 } from 'lucide-react';
 import { ChartTemplate, WebComponentTemplate, Dataset } from '../types';
 import { WebComponentBuilderModal } from './WebComponentBuilderModal';
@@ -34,6 +38,9 @@ interface TemplateManagerProps {
   // Web Component Handlers
   onSaveWebComponent: (comp: WebComponentTemplate) => void;
   onDeleteWebComponent: (id: number) => void;
+
+  // Data Loading
+  onRefreshData?: () => void;
 }
 
 export const TemplateManager: React.FC<TemplateManagerProps> = ({ 
@@ -44,8 +51,15 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({
   onSaveChart,
   onDeleteChart,
   onSaveWebComponent,
-  onDeleteWebComponent
+  onDeleteWebComponent,
+  onRefreshData
 }) => {
+  useEffect(() => {
+    if (onRefreshData) {
+      onRefreshData();
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'charts' | 'web-components'>('charts');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -72,6 +86,11 @@ export const TemplateManager: React.FC<TemplateManagerProps> = ({
       case 'AreaChart': return <AreaChart className="w-5 h-5 text-indigo-600" />;
       case 'Radar': return <Radar className="w-5 h-5 text-rose-600" />;
       case 'ScatterChart': return <ScatterChart className="w-5 h-5 text-cyan-600" />;
+      case 'Map': return <Map className="w-5 h-5 text-emerald-600" />;
+      case 'Filter': return <Filter className="w-5 h-5 text-orange-600" />;
+      case 'Gauge': return <Gauge className="w-5 h-5 text-indigo-600" />;
+      case 'BoxSelect': return <BoxSelect className="w-5 h-5 text-purple-600" />;
+      case 'Code': return <Code className="w-5 h-5 text-slate-600" />;
       default: return <LayoutTemplate className="w-5 h-5 text-slate-600" />;
     }
   };

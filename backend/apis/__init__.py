@@ -6,3 +6,4 @@ from .chart_template import router as chart_template_router
 from .ai import router as ai_router
 from .saved_component import router as saved_component_router
 from .template import router as template_router
+from .widget import router as widget_router

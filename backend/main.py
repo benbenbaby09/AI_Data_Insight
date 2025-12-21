@@ -6,7 +6,7 @@ try:
     load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 except Exception:
     pass
-from backend.apis import (
+from .apis import (
     datasource_router,
     dataset_router,
     dashboard_router,
@@ -14,7 +14,8 @@ from backend.apis import (
     chart_template_router,
     ai_router,
     saved_component_router,
-    template_router
+    template_router,
+    widget_router
 )
 
 app = FastAPI()
@@ -32,8 +33,9 @@ app.add_middleware(
 app.include_router(datasource_router)
 app.include_router(dataset_router)
 app.include_router(dashboard_router)
-app.include_router(web_component_router)
-app.include_router(chart_template_router)
+# app.include_router(web_component_router)  # Deprecated
+# app.include_router(chart_template_router) # Deprecated
+app.include_router(widget_router)           # New consolidated router
 app.include_router(ai_router)
 app.include_router(saved_component_router)
 app.include_router(template_router, prefix="/api/templates", tags=["templates"])

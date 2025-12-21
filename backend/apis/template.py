@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from backend.db.session import get_db
 from backend.schemas import base as schemas
@@ -9,8 +9,8 @@ from backend.services.template_service import TemplateService
 router = APIRouter()
 
 @router.get("/", response_model=List[schemas.Template])
-def read_templates(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    templates = TemplateService.get_templates(db, skip=skip, limit=limit)
+def read_templates(skip: int = 0, limit: int = 100, category: Optional[str] = None, db: Session = Depends(get_db)):
+    templates = TemplateService.get_templates(db, skip=skip, limit=limit, category=category)
     return templates
 
 @router.post("/", response_model=schemas.Template)

@@ -25,15 +25,9 @@ class ModelScopeStrategy(LLMStrategy):
         from backend.services.modelscope_service import call_llm as ms_call
         return ms_call(messages, schema_hint)
 
-class OpenRouterStrategy(LLMStrategy):
-    def call(self, messages: List[Dict[str, Any]], schema_hint: Optional[str] = None) -> Dict[str, Any]:
-        from backend.services.openrouter_service import call_llm as or_call
-        return or_call(messages, schema_hint)
-
 STRATEGY_REGISTRY: Dict[str, LLMStrategy] = {
     "siliconflow": SiliconFlowStrategy(),
     "modelscope": ModelScopeStrategy(),
-    "openrouter": OpenRouterStrategy(),
 }
 
 def get_strategy() -> LLMStrategy:
@@ -51,20 +45,141 @@ def _get_provider_override(kind: str) -> Optional[str]:
         return os.getenv("AI_WEB_COMPONENT_PROVIDER")
     return None
 
-def generate_dataset_sql(data_sources: List[Dict[str, Any]], user_query: str) -> Dict[str, Any]:
-    schema_context = []
-    for ds in data_sources:
-        tables = ds.get("tables", [])[:50]
-        schema_context.append({
-            "tables": [
-                {
-                    "name": t.get("name"),
-                    "description": (t.get("description") or "")[:100],
-                    "columns": [{"name": c.get("name"), "type": c.get("type"), "alias": c.get("alias"), "description": c.get("description")} for c in t.get("columns", [])]
-                }
-                for t in tables
+from sqlalchemy.orm import Session
+from backend.models.orm import DataSource, TableEntry
+
+def select_relevant_tables(user_query: str, all_tables_summary: List[Dict[str, Any]]) -> List[int]:
+    """
+    Selects relevant table IDs based on user query.
+    """
+    system = {
+        "role": "system",
+        "content": "You are a Database Expert. Given a user query and a list of table summaries, identify the most relevant tables. Return a JSON object with a key 'relevant_table_ids' containing a list of table IDs."
+    }
+    
+    # Context could be large, so we format it concisely
+    # Limit summary length per table to avoid token overflow
+    tables_context_lines = []
+    for t in all_tables_summary:
+        desc = (t['description'] or "")[:100] # Truncate description
+        tables_context_lines.append(f"ID: {t['id']}, Name: {t['name']}, Desc: {desc}")
+    
+    tables_context = "\n".join(tables_context_lines)
+    
+    user = {
+        "role": "user",
+        "content": f"User Query: \"{user_query}\"\n\nAvailable Tables:\n{tables_context}\n\nPlease select the table IDs that are necessary to answer the query. Return JSON with 'relevant_table_ids'."
+    }
+    
+    result = _call_llm([system, user], schema_hint="table_selection")
+    
+    if "error" in result:
+        logger.error(f"Table selection failed: {result['error']}")
+        return []
+        
+    ids = result.get("relevant_table_ids", [])
+    if isinstance(ids, list):
+        return [int(i) for i in ids if isinstance(i, (int, str)) and str(i).isdigit()]
+    return []
+
+def auto_select_tables(db: Session, data_source_id: int, user_query: str) -> Dict[str, Any]:
+    """
+    Selects relevant tables based on user query.
+    Returns a dict with 'selectedTableIds' and possibly 'reasoning' or just the ids.
+    """
+    all_tables = db.query(TableEntry).filter(TableEntry.dataSourceId == data_source_id).all()
+    annotated_tables = [t for t in all_tables if t.simple_description]
+    
+    if not annotated_tables:
+        raise ValueError("当前数据源没有已标注的表，无法进行自动选择。请先对表进行标注（添加简要描述）。")
+
+    table_summaries = [
+        {"id": t.id, "name": t.name, "description": t.simple_description}
+        for t in annotated_tables
+    ]
+    
+    selected_ids = select_relevant_tables(user_query, table_summaries)
+    
+    # Fallback logic same as generate_dataset_sql
+    if not selected_ids:
+        if len(annotated_tables) <= 3:
+            selected_ids = [t.id for t in annotated_tables]
+        else:
+            selected_ids = []
+            
+    return {"selectedTableIds": selected_ids}
+
+def generate_dataset_sql(db: Session, data_source_id: int, table_ids: List[int], user_query: str, skip_auto_select: bool = False) -> Dict[str, Any]:
+    # Fetch data source and tables from database
+    data_source = db.query(DataSource).filter(DataSource.id == data_source_id).first()
+    if not data_source:
+        raise ValueError(f"DataSource with id {data_source_id} not found")
+
+    if not table_ids:
+        if skip_auto_select:
+             tables = []
+        else:
+            # Auto-selection mode: Fetch all tables for this data source
+            all_tables = db.query(TableEntry).filter(TableEntry.dataSourceId == data_source_id).all()
+            
+            # Filter only annotated tables
+            annotated_tables = [t for t in all_tables if t.simple_description]
+            
+            if not annotated_tables:
+                raise ValueError("当前数据源没有已标注的表，无法进行自动选择。请先对表进行标注（添加简要描述）。")
+
+            # Prepare summary for AI selection
+            table_summaries = [
+                {"id": t.id, "name": t.name, "description": t.simple_description}
+                for t in annotated_tables
             ]
+            
+            # Use AI to select relevant tables
+            selected_ids = select_relevant_tables(user_query, table_summaries)
+            
+            if not selected_ids:
+                 # If AI selects nothing, but we have few tables, maybe use all?
+                 # For now, let's trust the AI or fallback to all if very few (< 3)
+                 if len(annotated_tables) <= 3:
+                     tables = annotated_tables
+                 else:
+                     # If we return empty, the SQL generation will likely fail or be generic.
+                     # Let's try to proceed with empty and let the next step handle it (which will result in empty context)
+                     tables = []
+                     logger.warning("AI selected no tables for query: %s", user_query)
+            else:
+                 tables = [t for t in annotated_tables if t.id in selected_ids]
+                 
+            if not tables and len(annotated_tables) > 0:
+                 # Fallback: if AI selection failed entirely (returned empty), maybe just pick top 5?
+                 # Or just error out.
+                 # Let's try to return a helpful error in the SQL explanation later if context is empty.
+                 pass
+
+    else:
+        tables = db.query(TableEntry).filter(TableEntry.id.in_(table_ids)).all()
+        if not tables:
+             raise ValueError(f"No valid tables found for ids {table_ids}")
+
+    processed_tables = []
+    for t in tables:
+        simple_desc = t.simple_description
+        if not simple_desc:
+            raise ValueError(f"Table '{t.name}' is missing simple_description. Please save table annotations first.")
+        
+        # Parse columns from JSON if needed (TableEntry columns is JSON field)
+        cols = t.columns if isinstance(t.columns, list) else []
+        
+        processed_tables.append({
+            "name": t.name,
+            "description": simple_desc,
+            "columns": [{"name": c.get("name"), "type": c.get("type"), "alias": c.get("alias"), "description": c.get("description")} for c in cols]
         })
+
+    schema_context = [{
+        "tables": processed_tables
+    }]
+    
     system = {
         "role": "system",
         "content": "You are a specialized SQL generation assistant. Respond in Simplified Chinese and return valid JSON with fields 'sql' and 'explanation'."
@@ -75,13 +190,15 @@ def generate_dataset_sql(data_sources: List[Dict[str, Any]], user_query: str) ->
     }
     result = _call_llm([system, user], schema_hint="dataset_sql")
     if "error" in result:
-        return {"sql": "-- AI Generation Failed", "explanation": f"生成 SQL 失败：{result['error']}"}
+        return {"sql": "-- AI Generation Failed", "explanation": f"生成 SQL 失败：{result['error']}", "relevantTableIds": [t.id for t in tables]}
+    
+    result["relevantTableIds"] = [t.id for t in tables]
     return result
 
 def generate_table_annotations(table_name: str, table_description: Optional[str], columns: List[Dict[str, str]]) -> List[Dict[str, str]]:
     system = {
         "role": "system",
-        "content": "You are a Data Dictionary Specialist. Respond in Simplified Chinese and return an array of objects with 'columnName','alias','description'."
+        "content": "You are a Data Dictionary Specialist. Respond in Simplified Chinese. Return a JSON object with a key 'annotations' containing an array of objects. Each object must have exactly these keys: 'columnName' (must match input column name exactly), 'alias' (Chinese short name), 'description' (business meaning)."
     }
     user = {
         "role": "user",
@@ -90,10 +207,30 @@ def generate_table_annotations(table_name: str, table_description: Optional[str]
     result = _call_llm([system, user], schema_hint="table_annotations")
     if "error" in result:
         return []
-    # Ensure array format
+    # Try common keys
+    raw_list = []
     if isinstance(result, list):
-        return result
-    return result.get("annotations", [])
+        raw_list = result
+    else:
+        for key in ["annotations", "columns", "data", "result"]:
+            if key in result and isinstance(result[key], list):
+                raw_list = result[key]
+                break
+    
+    # Normalize keys to ensure frontend compatibility
+    normalized = []
+    for item in raw_list:
+        if not isinstance(item, dict):
+            continue
+        new_item = {
+            "columnName": item.get("columnName") or item.get("column_name") or item.get("name"),
+            "alias": item.get("alias") or item.get("chinese_name") or item.get("title"),
+            "description": item.get("description") or item.get("desc") or item.get("business_meaning")
+        }
+        if new_item["columnName"]:
+            normalized.append(new_item)
+            
+    return normalized
 
 def generate_data_insight(tables: List[Dict[str, Any]], user_query: str, reference_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     system = {
